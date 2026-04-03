@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <code>npm install -g claude-starter</code>&nbsp;&nbsp;→&nbsp;&nbsp;<code>start-claude</code>
+  <code>git clone</code>&nbsp;&nbsp;→&nbsp;&nbsp;<code>npm link</code>&nbsp;&nbsp;→&nbsp;&nbsp;<code>start-claude</code>
 </p>
 
 <p align="center">
@@ -61,14 +61,10 @@
 ### 安装
 
 ```bash
-npm install -g claude-starter
-```
-
-或者从源码安装：
-
-```bash
 git clone https://github.com/Bojun-Vvibe/claude-starter.git
-cd claude-starter && npm install && npm link
+cd claude-starter
+npm install
+npm link
 ```
 
 然后运行 `start-claude`，就这么简单。
@@ -175,14 +171,6 @@ When you're done, just press `↑` or `↓` to exit search and navigate the resu
 | 🔒 | **100% Local** | Reads `~/.claude/` directly. No network. No telemetry. |
 
 ## Install
-
-### npm (recommended)
-
-```bash
-npm install -g claude-starter
-```
-
-### From source
 
 ```bash
 git clone https://github.com/Bojun-Vvibe/claude-starter.git
