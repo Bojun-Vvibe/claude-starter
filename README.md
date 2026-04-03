@@ -19,6 +19,75 @@
   <code>npm install -g claude-starter</code>&nbsp;&nbsp;→&nbsp;&nbsp;<code>start-claude</code>
 </p>
 
+<p align="center">
+  <a href="#-中文说明">中文</a> · <a href="#the-problem">English</a>
+</p>
+
+---
+
+## 🇨🇳 中文说明
+
+### 痛点
+
+用过 Claude Code 的 `/resume` 吗？它给你的是这样一坨东西：
+
+```
+? Select a conversation
+  3ee0f33a-b882-424f-9ba4-260342e4dd5b - 4/3/2026, 10:53:41 AM
+  87570bab-ee92-4681-9591-54abf2fcb486 - 4/3/2026, 10:18:55 AM
+  ...200 个 UUID...
+```
+
+一堆 UUID，没有上下文，无法搜索。**想找到上周帮你调过 bug 的那个 session？祝你好运。**
+
+### Claude Starter 是什么
+
+**Claude Starter** 是一个精美的终端可视化工具，让你能像浏览网页一样浏览所有 Claude 历史会话。它是你的 **Claude 主页** —— 每次打开终端，`start-claude` 一敲，所有 session 一目了然。
+
+### 核心能力
+
+🎨 **精美的分屏 UI** — Tokyo Night 配色，左侧列表 + 右侧详情预览，像一个真正的 App
+
+✨ **一键启动** — 列表第一项就是「新建 Session」，Enter 直接开始
+
+🔍 **强大的搜索** — 按 `/` 即搜，**实时过滤**，跨项目名、Git 分支、对话内容、话题全文搜索。输完直接 `↑↓` 导航结果，无需确认。搜「merge queue」？0.1 秒找到那个帮你修 CI 的 session。搜「bazel」？所有构建相关的对话立刻浮出。
+
+📂 **项目过滤** — 按 `p` 弹出项目选择器，只看某个项目的 session
+
+⚡ **秒级加载** — 200 个 session 在 10ms 内加载完毕
+
+🔒 **完全本地** — 读取 `~/.claude/` 目录，不联网，不上传，不追踪
+
+### 安装
+
+```bash
+npm install -g claude-starter
+```
+
+或者从源码安装：
+
+```bash
+git clone https://github.com/Bojun-Vvibe/claude-starter.git
+cd claude-starter && npm install && npm link
+```
+
+然后运行 `start-claude`，就这么简单。
+
+### 快捷键
+
+| 按键 | 功能 |
+|:---:|------|
+| `↑` `↓` | 上下导航 |
+| `Enter` | 启动新 / 恢复选中的 session |
+| `n` | 直接启动新 session |
+| `/` | 搜索 — 输入即过滤，`↑↓` 退出搜索直接导航 |
+| `Backspace` | 逐字删除搜索词，删空自动退出搜索 |
+| `Esc` | 清空搜索，重置视图 |
+| `p` | 按项目过滤 |
+| `s` | 切换排序：时间 / 大小 / 消息数 / 项目 |
+| `c` | 复制 Session ID 到剪贴板 |
+| `q` | 退出 |
+
 ---
 
 ## The Problem
@@ -56,8 +125,9 @@ start-claude
 │                                      │ Tools    [Bash] [Read] [Edit]        │
 │                                      │                                       │
 │                                      │ 💬 Conversation                      │
-│                                      │ You ❯ 分析一下这个pipeline...         │
-│                                      │ Claude ❯ Let me look at...           │
+│                                      │ You ❯ 帮我实现一个 LRU Cache         │
+│                                      │ Claude ❯ I'll implement an           │
+│                                      │   LRU cache with O(1) get/put...     │
 ├──────────────────────────────────────┴───────────────────────────────────────┤
 │ ↵ Start/Resume │ n New │ / Search │ ↑/↓ Nav │ p Project │ s Sort │ q Quit  │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -65,13 +135,37 @@ start-claude
 
 **Every session, at a glance.** Project-colored labels, relative timestamps, message counts, and the actual conversation topic — not a UUID.
 
+## 🔍 Search — The Killer Feature
+
+Press `/` and start typing. **That's it.** No Enter needed.
+
+The search is instant and searches across **everything** — project names, Git branches, conversation content, topics. Results update as you type.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 🚀 Claude Starter │ 3/189 sessions │ / merge queue▌                        │
+├──────────────────────────────────────┬───────────────────────────────────────┤
+│ app-ios        2d ago   31m  删掉.. │ ...                                   │
+│ app-ios        3d ago   54m  提一.. │                                       │
+│ ▸ app-ios      5d ago  117m  分析.. │                                       │
+```
+
+- Type `bazel` → find every build-related session
+- Type `merge queue` → find that CI fix from last week
+- Type `PR` → all your pull request sessions
+- Type `app-ios fix` → narrow down to bug fixes in iOS
+
+When you're done, just press `↑` or `↓` to exit search and navigate the results. Press `Backspace` to edit — when the search is empty, you're back to the full list. Press `Esc` to clear everything.
+
+**No modes to manage. No Enter to confirm. Just type and go.**
+
 ## Features
 
 | | Feature | Description |
 |---|---|---|
 | 🎨 | **Beautiful TUI** | Tokyo Night color scheme, split-pane layout, feels native in your terminal |
 | ✨ | **New Session** | Launch a fresh Claude session in one keystroke |
-| 🔍 | **Instant Search** | Type `/` and fuzzy-filter across projects, branches, topics, messages |
+| 🔍 | **Instant Search** | Type `/` and fuzzy-filter across projects, branches, topics, messages — no Enter needed |
 | 📂 | **Project Grouping** | Press `p` to filter by project — see only what matters |
 | ⚡ | **One-Key Resume** | Arrow to a session, hit Enter, you're back in the conversation |
 | 📋 | **Session Preview** | Right panel shows full metadata, tools used, and conversation history |
@@ -124,7 +218,7 @@ start-claude --help
 | `↑` `↓` | Navigate sessions |
 | `Enter` | Start new / resume selected session |
 | `n` | Start new session immediately |
-| `/` | Search — type to filter, `↑/↓` to exit search and navigate |
+| `/` | Search — type to filter, `↑/↓` to exit and navigate results |
 | `Backspace` | Delete search chars (auto-exits when empty) |
 | `Esc` | Clear filter, reset view |
 | `p` | Filter by project (popup picker) |
