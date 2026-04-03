@@ -404,7 +404,7 @@ function createApp() {
 
   // ─── Populate list ─────────────────────────────────────────────────────
   // Index 0 = "New Session", index 1+ = sessions
-  const NEW_SESSION_LABEL = ' {#9ece6a-fg}{bold}✨ New Session{/}';
+  const NEW_SESSION_LABEL = ' {#9ece6a-fg}{bold}✨ New Conversation{/}';
 
   function refreshList() {
     const listW = Math.floor((screen.width || 100) / 2) - 2;
@@ -433,15 +433,17 @@ function createApp() {
   // ─── Render Detail Panel ───────────────────────────────────────────────
   function renderDetail() {
     if (selectedIndex === -1) {
+      const cli = hasMaiClaude ? 'mai-claude' : 'claude';
       let c = '';
-      c += `\n {#9ece6a-fg}{bold}✨ Start New Session{/}\n`;
+      c += `\n {#9ece6a-fg}{bold}✨ Start a New Conversation{/}\n`;
       c += ` {#414868-fg}${'─'.repeat(44)}{/}\n\n`;
-      c += ` {#a9b1d6-fg}Launch a fresh Claude session{/}\n`;
-      c += ` {#a9b1d6-fg}in the current directory.{/}\n\n`;
-      c += ` {#565f89-fg}Directory{/}    {#7dcfff-fg}${process.cwd()}{/}\n`;
-      c += ` {#565f89-fg}CLI{/}          {#73daca-fg}${hasMaiClaude ? 'mai-claude' : 'claude'}{/}\n\n`;
+      c += ` {#a9b1d6-fg}Open a fresh Claude session and start{/}\n`;
+      c += ` {#a9b1d6-fg}coding from scratch.{/}\n\n`;
+      c += ` {#565f89-fg}Working Dir{/}  {#7dcfff-fg}${process.cwd()}{/}\n`;
+      c += ` {#565f89-fg}CLI{/}          {#73daca-fg}${cli}{/}\n`;
+      c += ` {#565f89-fg}Command{/}      {#565f89-fg}${cli}{/}\n\n`;
       c += ` {#414868-fg}${'─'.repeat(44)}{/}\n`;
-      c += ` {#9ece6a-fg}{bold}↵ Enter{/}{#9ece6a-fg} to start{/}\n`;
+      c += ` {#9ece6a-fg}{bold}↵ Enter{/}{#9ece6a-fg} or {/}{#9ece6a-fg}{bold}n{/}{#9ece6a-fg} to launch{/}\n`;
       detailPanel.setContent(c);
       detailPanel.setScroll(0);
       return;
@@ -507,7 +509,7 @@ function createApp() {
     }
 
     c += `\n${sep}`;
-    c += `\n {#9ece6a-fg}{bold}↵ Enter{/}{#9ece6a-fg} to resume this session{/}`;
+    c += `\n {#9ece6a-fg}{bold}↵ Enter{/}{#9ece6a-fg} to resume this conversation{/}`;
     c += `\n {#565f89-fg}mai-claude --resume ${session.sessionId}{/}\n`;
 
     detailPanel.setContent(c);
@@ -701,7 +703,7 @@ function createApp() {
       args = ['--resume', session.sessionId];
     }
 
-    console.log(`\n\x1b[36m⚡ Resuming with ${label}\x1b[0m`);
+    console.log(`\n\x1b[36m⚡ Resuming conversation with ${label}\x1b[0m`);
     console.log(`\x1b[90m   Session: ${session.sessionId}\x1b[0m`);
     console.log(`\x1b[90m   Project: ${session.project}  │  Branch: ${session.gitBranch || 'N/A'}  │  Messages: ${session.estimatedMessages}\x1b[0m\n`);
 
@@ -728,7 +730,7 @@ function createApp() {
       args = [];
     }
 
-    console.log(`\n\x1b[36m✨ Starting new session with ${label}\x1b[0m\n`);
+    console.log(`\n\x1b[36m✨ Starting new conversation with ${label}\x1b[0m\n`);
 
     const child = spawn(cmd, args, { stdio: 'inherit', cwd: process.cwd() });
     child.on('error', (err) => {
