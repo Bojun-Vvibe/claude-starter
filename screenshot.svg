@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="520" viewBox="0 0 920 520">
+  <defs>
+    <style>
+      @font-face { font-family: 'JetBrains Mono'; src: local('JetBrains Mono'), local('Menlo'), local('Monaco'), local('Courier New'); }
+      text { font-family: 'JetBrains Mono', 'Menlo', 'Monaco', 'Courier New', monospace; font-size: 12px; }
+      .bg { fill: #1a1b26; }
+      .fg { fill: #a9b1d6; }
+      .blue { fill: #7aa2f7; }
+      .purple { fill: #bb9af7; }
+      .cyan { fill: #7dcfff; }
+      .green { fill: #9ece6a; }
+      .orange { fill: #e0af68; }
+      .pink { fill: #f7768e; }
+      .teal { fill: #73daca; }
+      .muted { fill: #565f89; }
+      .border { fill: #414868; }
+      .sel-bg { fill: #3d59a1; }
+      .bold { font-weight: bold; }
+    </style>
+  </defs>
+
+  <!-- Window chrome -->
+  <rect width="920" height="520" rx="10" class="bg"/>
+  <rect x="0" y="0" width="920" height="30" rx="10" fill="#24283b"/>
+  <rect x="0" y="20" width="920" height="10" fill="#24283b"/>
+  <circle cx="20" cy="15" r="6" fill="#f7768e"/>
+  <circle cx="40" cy="15" r="6" fill="#e0af68"/>
+  <circle cx="60" cy="15" r="6" fill="#9ece6a"/>
+  <text x="460" y="19" text-anchor="middle" class="muted" font-size="11">Claude Starter</text>
+
+  <!-- Header -->
+  <text x="15" y="55" class="blue bold">🚀 Claude Starter</text>
+  <text x="195" y="55" class="border">│</text>
+  <text x="210" y="55" class="green">142</text>
+  <text x="235" y="55" class="muted">/142 sessions</text>
+  <text x="345" y="55" class="border">│</text>
+  <text x="360" y="55" class="purple">5</text>
+  <text x="373" y="55" class="muted">projects</text>
+  <text x="440" y="55" class="border">│</text>
+  <text x="455" y="55" class="teal">↕time</text>
+
+  <!-- Separator -->
+  <line x1="0" y1="65" x2="920" y2="65" stroke="#414868" stroke-width="1"/>
+
+  <!-- Vertical separator -->
+  <line x1="460" y1="65" x2="460" y2="480" stroke="#414868" stroke-width="1"/>
+
+  <!-- Left panel - Session list -->
+  <text x="15" y="85" class="green bold">✨ New Conversation</text>
+
+  <text x="15" y="105" class="blue">web-app       </text><text x="125" y="105" class="orange">Today 14:32     </text><text x="265" y="105" class="blue"> 384</text><text x="295" y="105" class="muted">m</text><text x="310" y="105" class="fg">帮我实现一个 LRU Cache</text>
+
+  <text x="15" y="125" class="blue">web-app       </text><text x="125" y="125" class="orange">Today 11:05     </text><text x="265" y="125" class="blue"> 127</text><text x="295" y="125" class="muted">m</text><text x="310" y="125" class="fg">Fix the login redirect loop</text>
+
+  <text x="15" y="145" class="purple">my-saas-api   </text><text x="125" y="145" class="orange">Today 09:48     </text><text x="265" y="145" class="blue">  72</text><text x="295" y="145" class="muted">m</text><text x="310" y="145" class="fg">Add rate limiting to /api/v2</text>
+
+  <text x="15" y="165" class="cyan">dotfiles      </text><text x="125" y="165" class="orange">Yesterday 16:30 </text><text x="265" y="165" class="blue">  89</text><text x="295" y="165" class="muted">m</text><text x="310" y="165" class="fg">配置 zsh 插件和 alias</text>
+
+  <text x="15" y="185" class="green">ml-pipeline   </text><text x="125" y="185" class="orange">Yesterday 10:12 </text><text x="265" y="185" class="blue"> 215</text><text x="295" y="185" class="muted">m</text><text x="310" y="185" class="fg">Debug training data loader</text>
+
+  <!-- Selected row -->
+  <rect x="2" y="193" width="456" height="20" rx="2" class="sel-bg"/>
+  <text x="10" y="207" fill="white" class="bold">▸</text>
+  <text x="25" y="207" class="purple bold">my-saas-api   </text><text x="135" y="207" class="orange">2d ago 15:44    </text><text x="275" y="207" class="blue"> 165</text><text x="305" y="207" class="muted">m</text><text x="320" y="207" fill="white" class="bold">重构认证模块，换成 JWT</text>
+
+  <text x="15" y="227" class="blue">web-app       </text><text x="125" y="227" class="orange">2d ago 11:20    </text><text x="265" y="227" class="blue">  31</text><text x="295" y="227" class="muted">m</text><text x="310" y="227" class="fg">Upgrade React to v19</text>
+
+  <text x="15" y="247" class="orange">infra-deploy  </text><text x="125" y="247" class="orange">3d ago 09:15    </text><text x="265" y="247" class="blue"> 443</text><text x="295" y="247" class="muted">m</text><text x="310" y="247" class="fg">Terraform 迁移到 OpenTofu</text>
+
+  <text x="15" y="267" class="green">ml-pipeline   </text><text x="125" y="267" class="orange">3d ago 14:50    </text><text x="265" y="267" class="blue">  54</text><text x="295" y="267" class="muted">m</text><text x="310" y="267" class="fg">Optimize batch inference</text>
+
+  <text x="15" y="287" class="purple">my-saas-api   </text><text x="125" y="287" class="orange">4d ago 16:30    </text><text x="265" y="287" class="blue"> 198</text><text x="295" y="287" class="muted">m</text><text x="310" y="287" class="fg">Add Stripe webhook handler</text>
+
+  <text x="15" y="307" class="cyan">dotfiles      </text><text x="125" y="307" class="orange">5d ago 11:05    </text><text x="265" y="307" class="blue">  15</text><text x="295" y="307" class="muted">m</text><text x="310" y="307" class="fg">Set up tmux + neovim config</text>
+
+  <!-- Right panel - Detail -->
+  <text x="475" y="85" class="purple bold">█ my-saas-api</text>
+  <line x1="475" y1="93" x2="890" y2="93" stroke="#414868" stroke-width="1"/>
+
+  <text x="475" y="115" class="muted">Session     </text><text x="575" y="115" class="cyan">a1b2c3d4-e5f6-7890-abcd</text>
+  <text x="475" y="133" class="muted">Started     </text><text x="575" y="133" class="orange">4/1/2026, 3:44 PM</text>
+  <text x="475" y="151" class="muted">Last active </text><text x="575" y="151" class="orange">4/1/2026, 5:21 PM</text>
+  <text x="475" y="169" class="muted">Duration    </text><text x="575" y="169" class="green">1h 37m</text>
+  <text x="475" y="187" class="muted">Messages    </text><text x="575" y="187" class="blue">165</text>
+  <text x="475" y="205" class="muted">Branch      </text><text x="575" y="205" class="teal">⎇ feat/auth-refactor</text>
+  <text x="475" y="223" class="muted">Directory   </text><text x="575" y="223" class="muted">/Users/dev/my-saas-api</text>
+
+  <text x="475" y="250" class="cyan bold">Tools Used</text>
+  <text x="475" y="268" class="border">[</text><text x="483" y="268" class="cyan">Bash</text><text x="515" y="268" class="border">]</text>
+  <text x="525" y="268" class="border">[</text><text x="533" y="268" class="cyan">Read</text><text x="565" y="268" class="border">]</text>
+  <text x="575" y="268" class="border">[</text><text x="583" y="268" class="cyan">Edit</text><text x="615" y="268" class="border">]</text>
+  <text x="625" y="268" class="border">[</text><text x="633" y="268" class="cyan">Write</text><text x="673" y="268" class="border">]</text>
+  <text x="683" y="268" class="border">[</text><text x="691" y="268" class="cyan">Glob</text><text x="723" y="268" class="border">]</text>
+
+  <text x="475" y="296" class="purple bold">💬 Conversation</text>
+  <line x1="475" y1="304" x2="890" y2="304" stroke="#414868" stroke-width="1"/>
+
+  <text x="475" y="324" class="blue bold">You ❯</text><text x="525" y="324" class="fg"> 重构认证模块，换成 JWT</text>
+  <text x="475" y="342" class="green">Claude ❯</text><text x="545" y="342" class="muted"> I'll refactor the auth module to use</text>
+  <text x="545" y="358" class="muted">JWT with refresh token rotation...</text>
+
+  <text x="475" y="383" class="blue bold">You ❯</text><text x="525" y="383" class="fg"> refresh token 过期时间设多少？</text>
+  <text x="475" y="401" class="green">Claude ❯</text><text x="545" y="401" class="muted"> For refresh tokens, 7-30 days is</text>
+  <text x="545" y="417" class="muted">standard. I'd recommend 14 days...</text>
+
+  <text x="475" y="442" class="blue bold">You ❯</text><text x="525" y="442" class="fg"> Add tests for token rotation</text>
+  <text x="475" y="460" class="green">Claude ❯</text><text x="545" y="460" class="muted"> I'll add tests covering rotation,</text>
+  <text x="545" y="476" class="muted">expiry edge cases, and concurrent...</text>
+
+  <!-- Bottom separator -->
+  <line x1="0" y1="485" x2="920" y2="485" stroke="#414868" stroke-width="1"/>
+
+  <!-- Footer -->
+  <text x="15" y="505" class="blue bold">↵</text><text x="30" y="505" class="muted"> Start/Resume</text>
+  <text x="120" y="505" class="border">│</text>
+  <text x="130" y="505" class="blue bold">n</text><text x="142" y="505" class="muted"> New</text>
+  <text x="175" y="505" class="border">│</text>
+  <text x="185" y="505" class="blue bold">/</text><text x="197" y="505" class="muted"> Search</text>
+  <text x="255" y="505" class="border">│</text>
+  <text x="265" y="505" class="blue bold">↑/↓</text><text x="295" y="505" class="muted"> Nav</text>
+  <text x="330" y="505" class="border">│</text>
+  <text x="340" y="505" class="blue bold">p</text><text x="352" y="505" class="muted"> Project</text>
+  <text x="415" y="505" class="border">│</text>
+  <text x="425" y="505" class="blue bold">s</text><text x="437" y="505" class="muted"> Sort</text>
+  <text x="475" y="505" class="border">│</text>
+  <text x="485" y="505" class="blue bold">c</text><text x="497" y="505" class="muted"> Copy ID</text>
+  <text x="560" y="505" class="border">│</text>
+  <text x="570" y="505" class="blue bold">q</text><text x="582" y="505" class="muted"> Quit</text>
+</svg>

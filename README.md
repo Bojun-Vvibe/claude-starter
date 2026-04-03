@@ -18,6 +18,10 @@
   <code>git clone</code>&nbsp;&nbsp;→&nbsp;&nbsp;<code>npm link</code>&nbsp;&nbsp;→&nbsp;&nbsp;<code>start-claude</code>
 </p>
 
+<p align="center">
+  <img src="./screenshot.svg" alt="Claude Starter Screenshot" width="800" />
+</p>
+
 ---
 
 ## 痛点 / The Problem
@@ -44,29 +48,6 @@ Good luck finding that session where Claude fixed your auth bug last Tuesday.
 start-claude
 ```
 
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ 🚀 Claude Starter │ 142/142 sessions │ 5 projects │ ↕time                  │
-├──────────────────────────────────────┬───────────────────────────────────────┤
-│ ✨ New Conversation                 │                                       │
-│ web-app        Today 10:52  384m .. │ █ my-saas-api                         │
-│ web-app        Today 10:51  200m .. │ ─────────────────────────────────     │
-│ my-saas-api    Today 10:01   72m .. │                                       │
-│ dotfiles       Yesterday     89m .. │ Session  87570bab-ee92...             │
-│ web-app        2d ago        31m .. │ Started  4/3/2026, 10:18 AM          │
-│ ▸ my-saas-api  3d ago       165m .. │ Duration 41m                          │
-│                                      │ Branch   feat/auth-refactor          │
-│                                      │ Tools    [Bash] [Read] [Edit]        │
-│                                      │                                       │
-│                                      │ 💬 Conversation                      │
-│                                      │ You ❯ 帮我实现一个 LRU Cache         │
-│                                      │ Claude ❯ I'll implement an           │
-│                                      │   LRU cache with O(1) get/put...     │
-├──────────────────────────────────────┴───────────────────────────────────────┤
-│ ↵ Start/Resume │ n New │ / Search │ ↑/↓ Nav │ p Project │ s Sort │ q Quit  │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
 精美的分屏 UI，Tokyo Night 配色。左侧列表一目了然，右侧实时预览对话详情。不是 UUID，是你**真正说过的话**。
 
 Beautiful split-pane UI with Tokyo Night colors. The left panel shows every session with project, time, and topic. The right panel previews the full conversation. Not UUIDs — your **actual words**.
@@ -76,15 +57,6 @@ Beautiful split-pane UI with Tokyo Night colors. The left panel shows every sess
 按 `/` 开始输入，**就这么简单**。无需按回车。
 
 Press `/` and start typing. **That's it.** No Enter needed.
-
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ 🚀 Claude Starter │ 3/142 sessions │ / auth refactor▌                      │
-├──────────────────────────────────────┬───────────────────────────────────────┤
-│ my-saas-api    2d ago   31m  重构.. │ ...                                   │
-│ my-saas-api    3d ago   54m  JWT .. │                                       │
-│ ▸ web-app      5d ago  117m  登录.. │                                       │
-```
 
 跨项目名、Git 分支、对话内容**全文实时搜索**。输入即过滤，`↑↓` 直接导航结果。
 
