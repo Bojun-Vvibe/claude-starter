@@ -108,16 +108,16 @@ start-claude
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ 🚀 Claude Starter │ 189/189 sessions │ 8 projects │ ↕time                  │
+│ 🚀 Claude Starter │ 142/142 sessions │ 5 projects │ ↕time                  │
 ├──────────────────────────────────────┬───────────────────────────────────────┤
-│ ✨ New Session                      │                                       │
-│ app-ios        Today 10:52  384m .. │ █ app-ios                             │
-│ app-ios        Today 10:51  200m .. │ ─────────────────────────────────     │
-│ app-android    Today 10:01   72m .. │                                       │
-│ MSProject      Yesterday     89m .. │ Session  87570bab-ee92...             │
-│ app-ios        2d ago        31m .. │ Started  4/3/2026, 10:18 AM          │
-│ ▸ Azure-Pipe.. 3d ago       165m .. │ Duration 41m                          │
-│                                      │ Branch   main                        │
+│ ✨ New Conversation                 │                                       │
+│ web-app        Today 10:52  384m .. │ █ my-saas-api                         │
+│ web-app        Today 10:51  200m .. │ ─────────────────────────────────     │
+│ my-saas-api    Today 10:01   72m .. │                                       │
+│ dotfiles       Yesterday     89m .. │ Session  87570bab-ee92...             │
+│ web-app        2d ago        31m .. │ Started  4/3/2026, 10:18 AM          │
+│ ▸ my-saas-api  3d ago       165m .. │ Duration 41m                          │
+│                                      │ Branch   feat/auth-refactor          │
 │                                      │ Tools    [Bash] [Read] [Edit]        │
 │                                      │                                       │
 │                                      │ 💬 Conversation                      │
@@ -139,17 +139,17 @@ The search is instant and searches across **everything** — project names, Git 
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ 🚀 Claude Starter │ 3/189 sessions │ / merge queue▌                        │
+│ 🚀 Claude Starter │ 3/142 sessions │ / auth refactor▌                      │
 ├──────────────────────────────────────┬───────────────────────────────────────┤
-│ app-ios        2d ago   31m  删掉.. │ ...                                   │
-│ app-ios        3d ago   54m  提一.. │                                       │
-│ ▸ app-ios      5d ago  117m  分析.. │                                       │
+│ my-saas-api    2d ago   31m  重构.. │ ...                                   │
+│ my-saas-api    3d ago   54m  JWT .. │                                       │
+│ ▸ web-app      5d ago  117m  登录.. │                                       │
 ```
 
-- Type `bazel` → find every build-related session
-- Type `merge queue` → find that CI fix from last week
-- Type `PR` → all your pull request sessions
-- Type `app-ios fix` → narrow down to bug fixes in iOS
+- Type `auth` → find every authentication-related session
+- Type `refactor` → find that code cleanup from last week
+- Type `web-app` → all sessions in your web project
+- Type `web-app fix` → narrow down to bug fixes in the web app
 
 When you're done, just press `↑` or `↓` to exit search and navigate the results. Press `Backspace` to edit — when the search is empty, you're back to the full list. Press `Esc` to clear everything.
 
