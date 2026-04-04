@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <code>git clone</code>&nbsp;&nbsp;→&nbsp;&nbsp;<code>npm link</code>&nbsp;&nbsp;→&nbsp;&nbsp;<code>start-claude</code>
+  <code>git clone</code>&nbsp;&nbsp;→&nbsp;&nbsp;<code>npm link</code>&nbsp;&nbsp;→&nbsp;&nbsp;<code>claude-starter</code>
 </p>
 
 <p align="center">
@@ -41,10 +41,10 @@
 
 ## 解决方案
 
-**Claude Starter** 是一个精美的终端可视化工具，让你能像浏览网页一样浏览所有 Claude 历史会话。它是你的 **Claude 主页** —— 每次打开终端，`start-claude` 一敲，所有 session 一目了然。
+**Claude Starter** 是一个精美的终端可视化工具，让你能像浏览网页一样浏览所有 Claude 历史会话。它是你的 **Claude 主页** —— 每次打开终端，`claude-starter` 一敲，所有 session 一目了然。
 
 ```bash
-start-claude
+claude-starter
 ```
 
 精美的分屏 UI，Tokyo Night 配色。左侧列表一目了然，右侧实时预览对话详情。不是 UUID，是你**真正说过的话**。
@@ -85,7 +85,7 @@ npm install
 npm link
 ```
 
-然后运行 `start-claude`，就这么简单。
+然后运行 `claude-starter`，就这么简单。
 
 ## 快捷键
 
@@ -128,7 +128,7 @@ Good luck finding that session where Claude fixed your auth bug last Tuesday.
 ## The Solution
 
 ```bash
-start-claude
+claude-starter
 ```
 
 Beautiful split-pane UI with Tokyo Night colors. The left panel shows every session with project, time, and topic. The right panel previews the full conversation. Not UUIDs — your **actual words**.
@@ -172,7 +172,7 @@ npm link
 Then run:
 
 ```bash
-start-claude
+claude-starter
 ```
 
 ## Keyboard Shortcuts

@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 
 /**
- * Claude Starter (start-claude)
+ * Claude Starter (claude-starter)
  * ──────────────────────────────
  * A beautiful TUI for starting new and resuming past Claude Code sessions.
  *
  * Usage:
- *   start-claude            # Launch interactive TUI
- *   start-claude --list     # Print sessions as a table (no TUI)
- *   start-claude --list N   # Print the latest N sessions
+ *   claude-starter            # Launch interactive TUI
+ *   claude-starter --list     # Print sessions as a table (no TUI)
+ *   claude-starter --list N   # Print the latest N sessions
  *
  * Keyboard shortcuts (TUI mode):
  *   ↑/↓           Navigate sessions
@@ -851,9 +851,9 @@ if (args.includes('--help') || args.includes('-h')) {
 \x1b[36m🚀 Claude Starter\x1b[0m
 
 Usage:
-  start-claude            Launch interactive TUI
-  start-claude --list [N] Print latest N sessions (default: 30)
-  start-claude --help     Show this help
+  claude-starter            Launch interactive TUI
+  claude-starter --list [N] Print latest N sessions (default: 30)
+  claude-starter --help     Show this help
 
 TUI Keyboard Shortcuts:
   ↑/↓           Navigate sessions
