@@ -1,6 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/%F0%9F%9A%80-Claude_Starter-7aa2f7?style=for-the-badge&labelColor=1a1b26" alt="Claude Starter" />
   <br/>
+  <img src="https://img.shields.io/npm/v/claude-starter?style=flat-square&color=f7768e&logo=npm" alt="npm" />
   <img src="https://img.shields.io/badge/node-%3E%3D18-9ece6a?style=flat-square&logo=node.js&logoColor=white" alt="Node.js" />
   <img src="https://img.shields.io/badge/license-MIT-bb9af7?style=flat-square" alt="MIT License" />
   <img src="https://img.shields.io/github/v/release/Bojun-Vvibe/claude-starter?style=flat-square&color=7dcfff" alt="Release" />
@@ -15,7 +16,7 @@
 </p>
 
 <p align="center">
-  <code>git clone</code>&nbsp;&nbsp;→&nbsp;&nbsp;<code>npm link</code>&nbsp;&nbsp;→&nbsp;&nbsp;<code>claude-starter</code>
+  <code>npm install -g claude-starter</code>&nbsp;&nbsp;→&nbsp;&nbsp;<code>claude-starter</code>
 </p>
 
 <p align="center">
@@ -77,6 +78,12 @@ claude-starter
 | 🔒 | **完全本地** | 不联网，不上传，不追踪 |
 
 ## 安装
+
+```bash
+npm install -g claude-starter
+```
+
+或者从源码安装：
 
 ```bash
 git clone https://github.com/Bojun-Vvibe/claude-starter.git
@@ -161,6 +168,12 @@ Searches across **everything** — project names, Git branches, conversation con
 | 🔒 | **100% Local** | No network, no telemetry, no data leaves your machine |
 
 ## Install
+
+```bash
+npm install -g claude-starter
+```
+
+Or install from source:
 
 ```bash
 git clone https://github.com/Bojun-Vvibe/claude-starter.git
