@@ -27,8 +27,45 @@
 const blessed = require('blessed');
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const os = require('os');
+
+// ─── CLI Detection ──────────────────────────────────────────────────────────
+// Detect whether `mai-claude` is available (binary, alias, or function).
+// We check inside an interactive shell so aliases defined in .bashrc/.zshrc
+// are visible.  Falls back to plain `claude`.
+//
+// Returns { name, cmd } where:
+//   name = display label ("mai-claude" or "claude")
+//   cmd  = the actual command string to spawn (resolves aliases)
+
+function detectCLI() {
+  const shell = process.env.SHELL || '/bin/sh';
+  try {
+    const raw = execSync(`${shell} -ic "command -v mai-claude" 2>/dev/null`, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 3000,
+    }).toString().trim();
+
+    // Interactive shells may print extra lines (e.g. "Restored session: …").
+    // The relevant output is the last line(s) containing the alias or path.
+    const lines = raw.split('\n');
+    const aliasLine = lines.find(l => l.startsWith('alias ')) || lines[lines.length - 1];
+
+    // `command -v` for an alias returns: alias mai-claude='actual command'
+    // Extract the real command from inside the quotes if it's an alias.
+    const aliasMatch = aliasLine.match(/^alias [^=]+=(?:'(.+)'|"(.+)")$/s);
+    if (aliasMatch) {
+      return { name: 'mai-claude', cmd: aliasMatch[1] || aliasMatch[2] };
+    }
+    // Otherwise it's a binary/function path — use the name directly
+    return { name: 'mai-claude', cmd: 'mai-claude' };
+  } catch {
+    return { name: 'claude', cmd: 'claude' };
+  }
+}
+
+const CLI = detectCLI();
 
 // ─── Color Palette (Tokyo Night) ─────────────────────────────────────────────
 const PROJECT_COLORS = [
@@ -268,7 +305,7 @@ function runListMode(limit) {
     console.log(`${C.dim}${`${i+1}`.padStart(3)}${C.reset}  ${C.yellow}${formatTimestamp(s.lastTs).padEnd(18)}${C.reset} ${C.magenta}${s.project.substring(0,17).padEnd(18)}${C.reset} ${C.green}${(s.gitBranch||'').substring(0,21).padEnd(22)}${C.reset} ${C.blue}${`${s.estimatedMessages}`.padStart(5)}${C.reset}  ${C.dim}${formatFileSize(s.fileSize).padStart(6)}${C.reset}  ${C.white}${s.topic.substring(0,40)}${C.reset}`);
   });
   console.log(`${C.dim}${'─'.repeat(100)}${C.reset}`);
-  console.log(`\n${C.dim}Resume: ${C.cyan}claude --resume <session-id>${C.reset}\n`);
+  console.log(`\n${C.dim}Resume: ${C.cyan}${CLI.name} --resume <session-id>${C.reset}\n`);
 }
 
 // ─── TUI Application ────────────────────────────────────────────────────────
@@ -433,7 +470,7 @@ function createApp() {
   // ─── Render Detail Panel ───────────────────────────────────────────────
   function renderDetail() {
     if (selectedIndex === -1) {
-      const cli = hasMaiClaude ? 'mai-claude' : 'claude';
+      const cli = CLI.name;
       let c = '';
       c += `\n {#9ece6a-fg}{bold}✨ Start a New Conversation{/}\n`;
       c += ` {#414868-fg}${'─'.repeat(44)}{/}\n\n`;
@@ -510,7 +547,7 @@ function createApp() {
 
     c += `\n${sep}`;
     c += `\n {#9ece6a-fg}{bold}↵ Enter{/}{#9ece6a-fg} to resume this conversation{/}`;
-    c += `\n {#565f89-fg}mai-claude --resume ${session.sessionId}{/}\n`;
+    c += `\n {#565f89-fg}${CLI.name} --resume ${session.sessionId}{/}\n`;
 
     detailPanel.setContent(c);
     detailPanel.setScroll(0);
@@ -687,27 +724,20 @@ function createApp() {
 
   // ─── Resume Session ─────────────────────────────────────────────────────
   // Auto-detect: use mai-claude if available, otherwise fall back to claude
-  const hasMaiClaude = fs.existsSync('/opt/homebrew/bin/uv') && fs.existsSync('/Users/bojun/Desktop/MSProject/mai-agents');
 
   function resumeSession(session) {
     screen.destroy();
 
-    let cmd, args, label;
-    if (hasMaiClaude) {
-      label = 'mai-claude';
-      cmd = '/opt/homebrew/bin/uv';
-      args = ['--project=/Users/bojun/Desktop/MSProject/mai-agents', 'run', 'mai-claude', '--resume', session.sessionId];
-    } else {
-      label = 'claude';
-      cmd = 'claude';
-      args = ['--resume', session.sessionId];
-    }
+    const label = CLI.name;
 
     console.log(`\n\x1b[36m⚡ Resuming conversation with ${label}\x1b[0m`);
     console.log(`\x1b[90m   Session: ${session.sessionId}\x1b[0m`);
     console.log(`\x1b[90m   Project: ${session.project}  │  Branch: ${session.gitBranch || 'N/A'}  │  Messages: ${session.estimatedMessages}\x1b[0m\n`);
 
-    const child = spawn(cmd, args, { stdio: 'inherit', cwd: session.cwd || process.cwd() });
+    const child = spawn(
+      `${CLI.cmd} --resume ${session.sessionId}`,
+      { stdio: 'inherit', cwd: session.cwd || process.cwd(), shell: true },
+    );
     child.on('error', (err) => {
       console.error(`\x1b[31mFailed to resume: ${err.message}\x1b[0m`);
       console.log(`\x1b[33mManual: ${label} --resume ${session.sessionId}\x1b[0m`);
@@ -719,20 +749,11 @@ function createApp() {
   function startNewSession() {
     screen.destroy();
 
-    let cmd, args, label;
-    if (hasMaiClaude) {
-      label = 'mai-claude';
-      cmd = '/opt/homebrew/bin/uv';
-      args = ['--project=/Users/bojun/Desktop/MSProject/mai-agents', 'run', 'mai-claude'];
-    } else {
-      label = 'claude';
-      cmd = 'claude';
-      args = [];
-    }
+    const label = CLI.name;
 
     console.log(`\n\x1b[36m✨ Starting new conversation with ${label}\x1b[0m\n`);
 
-    const child = spawn(cmd, args, { stdio: 'inherit', cwd: process.cwd() });
+    const child = spawn(CLI.cmd, { stdio: 'inherit', cwd: process.cwd(), shell: true });
     child.on('error', (err) => {
       console.error(`\x1b[31mFailed to start: ${err.message}\x1b[0m`);
       process.exit(1);
