@@ -9,6 +9,8 @@
  *   claude-starter            # Launch interactive TUI
  *   claude-starter --list     # Print sessions as a table (no TUI)
  *   claude-starter --list N   # Print the latest N sessions
+ *   claude-starter --version  # Show version
+ *   claude-starter --update   # Update to the latest version
  *
  * Keyboard shortcuts (TUI mode):
  *   ↑/↓           Navigate sessions
@@ -18,9 +20,12 @@
  *   p              Filter by project (popup)
  *   s              Cycle sort: time → size → messages → project
  *   n              Start new session
+ *   d              Resume with bypassPermissions (danger mode)
+ *   m              Permission mode picker
  *   Home / End     Jump to top / bottom
  *   Ctrl-D/U       Page down / up
  *   c              Copy session ID to clipboard
+ *   x / Delete     Delete selected session
  *   q / Ctrl-C     Quit
  */
 
@@ -32,37 +37,72 @@ const os = require('os');
 
 // ─── CLI Detection ──────────────────────────────────────────────────────────
 // Detect whether `mai-claude` is available (binary, alias, or function).
-// We check inside an interactive shell so aliases defined in .bashrc/.zshrc
-// are visible.  Falls back to plain `claude`.
+// First checks PATH directly, then sources shell config non-interactively
+// to resolve aliases.  Falls back to plain `claude`.
+//
+// NOTE: We deliberately avoid `shell -i` (interactive mode) because it
+// triggers SIGTTOU in terminals like Warp that strictly manage TTY process
+// groups, causing `suspended (tty output)`.
 //
 // Returns { name, cmd } where:
 //   name = display label ("mai-claude" or "claude")
 //   cmd  = the actual command string to spawn (resolves aliases)
 
 function detectCLI() {
+  // Strategy:
+  // 1. First try non-interactive lookup (safe for all terminals including Warp)
+  // 2. Only fall back to interactive shell if needed for alias resolution
+  //
+  // IMPORTANT: avoid `shell -i` (interactive mode) — it can trigger SIGTTOU
+  // in terminals like Warp that strictly manage TTY process groups, causing
+  // the process to be suspended with "suspended (tty output)".
+
   const shell = process.env.SHELL || '/bin/sh';
+
+  // 1) Non-interactive: check if mai-claude exists as a binary on PATH
   try {
-    const raw = execSync(`${shell} -ic "command -v mai-claude" 2>/dev/null`, {
+    const binPath = execSync('command -v mai-claude 2>/dev/null', {
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 3000,
+      shell: true,
     }).toString().trim();
-
-    // Interactive shells may print extra lines (e.g. "Restored session: …").
-    // The relevant output is the last line(s) containing the alias or path.
-    const lines = raw.split('\n');
-    const aliasLine = lines.find(l => l.startsWith('alias ')) || lines[lines.length - 1];
-
-    // `command -v` for an alias returns: alias mai-claude='actual command'
-    // Extract the real command from inside the quotes if it's an alias.
-    const aliasMatch = aliasLine.match(/^alias [^=]+=(?:'(.+)'|"(.+)")$/s);
-    if (aliasMatch) {
-      return { name: 'mai-claude', cmd: aliasMatch[1] || aliasMatch[2] };
+    if (binPath) {
+      return { name: 'mai-claude', cmd: 'mai-claude' };
     }
-    // Otherwise it's a binary/function path — use the name directly
-    return { name: 'mai-claude', cmd: 'mai-claude' };
-  } catch {
-    return { name: 'claude', cmd: 'claude' };
-  }
+  } catch { /* not found as binary, continue */ }
+
+  // 2) Source shell config non-interactively to resolve aliases/functions.
+  //    This avoids `-i` which would try to claim the TTY and risk SIGTTOU.
+  try {
+    const isZsh = shell.endsWith('/zsh');
+    const rcFile = isZsh
+      ? path.join(os.homedir(), '.zshrc')
+      : path.join(os.homedir(), '.bashrc');
+
+    if (fs.existsSync(rcFile)) {
+      const raw = execSync(
+        `${shell} -c 'source "${rcFile}" 2>/dev/null; command -v mai-claude 2>/dev/null'`,
+        {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          timeout: 3000,
+          env: { ...process.env, PS1: '', PROMPT: '', NO_TTY: '1' },
+        },
+      ).toString().trim();
+
+      if (raw) {
+        const lines = raw.split('\n');
+        const aliasLine = lines.find(l => l.startsWith('alias ')) || lines[lines.length - 1];
+
+        const aliasMatch = aliasLine.match(/^alias [^=]+=(?:'(.+)'|"(.+)")$/s);
+        if (aliasMatch) {
+          return { name: 'mai-claude', cmd: aliasMatch[1] || aliasMatch[2] };
+        }
+        return { name: 'mai-claude', cmd: 'mai-claude' };
+      }
+    }
+  } catch { /* alias resolution failed, fall back to claude */ }
+
+  return { name: 'claude', cmd: 'claude' };
 }
 
 const CLI = detectCLI();
@@ -483,11 +523,12 @@ function createApp() {
       '{#7aa2f7-fg}{bold}n{/} {#565f89-fg}New{/}',
       '{#7aa2f7-fg}{bold}↵{/} {#565f89-fg}Resume{/}',
       '{#7aa2f7-fg}{bold}m{/} {#565f89-fg}Mode{/}',
-      '{#7aa2f7-fg}{bold}d{/} {#565f89-fg}Danger{/}',
+      '{#f7768e-fg}{bold}d{/} {#565f89-fg}Danger{/}',
       '{#7aa2f7-fg}{bold}/{/} {#565f89-fg}Search{/}',
       '{#7aa2f7-fg}{bold}p{/} {#565f89-fg}Project{/}',
       '{#7aa2f7-fg}{bold}s{/} {#565f89-fg}Sort{/}',
       '{#7aa2f7-fg}{bold}c{/} {#565f89-fg}Copy ID{/}',
+      '{#f7768e-fg}{bold}x{/} {#565f89-fg}Delete{/}',
       '{#7aa2f7-fg}{bold}q{/} {#565f89-fg}Quit{/}',
     ];
     footer.setContent(`\n ${keys.join(' {#414868-fg}│{/} ')}`);
@@ -1068,6 +1109,71 @@ function createApp() {
     showPermissionModePicker(filteredSessions[selectedIndex]);
   });
 
+  // ─── Delete Session ───────────────────────────────────────────────────
+  function deleteSession(session) {
+    try {
+      // Delete the .jsonl file
+      if (fs.existsSync(session.filePath)) {
+        fs.unlinkSync(session.filePath);
+      }
+      // Clean up meta entry
+      if (meta.sessions[session.sessionId]) {
+        delete meta.sessions[session.sessionId];
+        saveMeta(meta);
+      }
+      // Remove from in-memory arrays
+      const allIdx = allSessions.indexOf(session);
+      if (allIdx !== -1) allSessions.splice(allIdx, 1);
+      const filtIdx = filteredSessions.indexOf(session);
+      if (filtIdx !== -1) filteredSessions.splice(filtIdx, 1);
+      // Adjust selection
+      if (selectedIndex >= filteredSessions.length) {
+        selectedIndex = Math.max(-1, filteredSessions.length - 1);
+      }
+    } catch (e) { /* silently fail */ }
+  }
+
+  function showDeleteConfirm(session) {
+    const topic = (session.customTitle || session.topic || '').substring(0, 30);
+    const confirmPopup = blessed.box({
+      parent: screen, top: 'center', left: 'center',
+      width: 50, height: 9,
+      label: ' {bold}{#f7768e-fg}Delete Session?{/} ',
+      tags: true, border: { type: 'line' },
+      style: {
+        border: { fg: '#f7768e' }, bg: '#24283b', fg: '#a9b1d6',
+        label: { fg: '#f7768e' },
+      },
+      content:
+        `\n  {#a9b1d6-fg}${esc(topic)}{/}\n`
+        + `  {#565f89-fg}${session.sessionId}{/}\n\n`
+        + `  {#f7768e-fg}{bold}y{/}{#a9b1d6-fg} Delete  {/}{#565f89-fg}n / Esc{/}{#a9b1d6-fg} Cancel{/}`,
+    });
+    popupOpen = true;
+    confirmPopup.focus();
+    screen.render();
+
+    confirmPopup.key(['y'], () => {
+      confirmPopup.destroy();
+      popupOpen = false;
+      deleteSession(session);
+      footer.setContent(`\n  {#f7768e-fg}{bold}✗ Deleted:{/} {#565f89-fg}${session.sessionId}{/}`);
+      renderAll();
+      setTimeout(() => { updateFooter(); screen.render(); }, 1500);
+    });
+    confirmPopup.key(['n', 'escape', 'q'], () => {
+      confirmPopup.destroy();
+      popupOpen = false;
+      screen.render();
+    });
+  }
+
+  screen.key(['x', 'delete'], () => {
+    if (isSearchMode || popupOpen) return;
+    if (selectedIndex < 0 || selectedIndex >= filteredSessions.length) return;
+    showDeleteConfirm(filteredSessions[selectedIndex]);
+  });
+
   screen.key(['s'], () => { if (!isSearchMode) cycleSort(); });
   screen.key(['p'], () => { if (!isSearchMode) showProjectPicker(); });
   screen.key(['escape'], () => {
@@ -1123,25 +1229,76 @@ function createApp() {
 
 // ─── Entry Point ─────────────────────────────────────────────────────────────
 
+const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'));
+
 const args = process.argv.slice(2);
+
+if (args.includes('--version') || args.includes('-v') || args.includes('-V')) {
+  console.log(`claude-starter v${PKG.version}`);
+  process.exit(0);
+}
+
+if (args.includes('--update') || args.includes('-u')) {
+  const C = {
+    reset: '\x1b[0m', dim: '\x1b[2m', bold: '\x1b[1m',
+    cyan: '\x1b[36m', yellow: '\x1b[33m', green: '\x1b[32m',
+    red: '\x1b[31m',
+  };
+  console.log(`\n${C.cyan}🔄 Checking for updates…${C.reset}\n`);
+
+  try {
+    const latest = execSync('npm view claude-starter version 2>/dev/null', {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 10000,
+    }).toString().trim();
+
+    if (latest === PKG.version) {
+      console.log(`${C.green}✓ Already on the latest version (v${PKG.version})${C.reset}\n`);
+      process.exit(0);
+    }
+
+    console.log(`${C.yellow}  Current: v${PKG.version}${C.reset}`);
+    console.log(`${C.green}  Latest:  v${latest}${C.reset}\n`);
+    console.log(`${C.cyan}📦 Updating…${C.reset}\n`);
+
+    try {
+      execSync('npm install -g claude-starter@latest', { stdio: 'inherit', timeout: 60000 });
+      console.log(`\n${C.green}${C.bold}✓ Updated to v${latest}${C.reset}\n`);
+    } catch (e) {
+      console.error(`\n${C.red}✗ Update failed. Try manually:${C.reset}`);
+      console.log(`${C.yellow}  npm install -g claude-starter@latest${C.reset}\n`);
+      process.exit(1);
+    }
+  } catch (e) {
+    console.error(`${C.red}✗ Could not check for updates (network error or npm not found)${C.reset}\n`);
+    process.exit(1);
+  }
+
+  process.exit(0);
+}
 
 if (args.includes('--help') || args.includes('-h')) {
   console.log(`
-\x1b[36m🚀 Claude Starter\x1b[0m
+\x1b[36m🚀 Claude Starter\x1b[0m  \x1b[2mv${PKG.version}\x1b[0m
 
 Usage:
-  claude-starter            Launch interactive TUI
-  claude-starter --list [N] Print latest N sessions (default: 30)
-  claude-starter --help     Show this help
+  claude-starter              Launch interactive TUI
+  claude-starter --list [N]   Print latest N sessions (default: 30)
+  claude-starter --version    Show version
+  claude-starter --update     Update to the latest version
+  claude-starter --help       Show this help
 
 TUI Keyboard Shortcuts:
   ↑/↓           Navigate sessions
   Enter         Start new / resume selected session
   n             Start new session
+  d             Resume with bypassPermissions (danger mode)
+  m             Permission mode picker
   /             Search (fuzzy filter)
   p             Filter by project
   s             Cycle sort mode (time/size/messages/project)
   c             Copy session ID
+  x / Delete    Delete selected session
   Home / End    Jump to top / bottom
   Ctrl-D/U      Page down / up
   Esc           Clear filter

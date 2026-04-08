@@ -59,19 +59,8 @@ claude-starter
 - `auth` → 所有认证相关的对话
 - `refactor` → 上周的代码重构
 - `web-app fix` → 某个项目的 bug 修复
-- `#bug-fix` → 所有打了 bug-fix 标签的对话
-- `fav` → 所有收藏的对话
 
 **不需要管理模式，不需要确认。输入即搜，方向键即走。**
-
-## ⭐ 收藏 & 🏷️ 标签 — 组织你的对话
-
-按 `f` 收藏/取消收藏，按 `#` 打标签。
-
-- **收藏**：重要的对话一键标星，排序切到 `favorites` 模式收藏置顶
-- **标签**：预设 8 种标签（`bug-fix`、`feature`、`refactor` 等），支持自定义
-- **搜索联动**：`/` 搜索支持 `#tag` 语法和 `fav` 关键字
-- **持久化**：数据存在 `~/.claude/claude-starter-meta.json`，重启不丢失
 
 ## 核心能力
 
@@ -79,16 +68,16 @@ claude-starter
 |---|---|---|
 | 🎨 | **精美 TUI** | Tokyo Night 配色，分屏布局，终端里的 App |
 | ✨ | **一键新建** | 列表顶部直接新建对话 |
-| 🔍 | **即时搜索** | `/` 全文搜索，无需回车，支持 `#tag` 和 `fav` |
-| ⭐ | **收藏** | `f` 收藏重要对话，排序置顶 |
-| 🏷️ | **标签** | `#` 分类管理，预设 + 自定义标签 |
+| 🔍 | **即时搜索** | `/` 全文搜索，无需回车 |
 | 📂 | **项目过滤** | `p` 按项目筛选 |
 | ⚡ | **秒级恢复** | 选中 → Enter → 回到对话 |
 | 📋 | **对话预览** | 右侧面板展示完整元数据和对话历史 |
-| 🔀 | **多种排序** | 时间 / 大小 / 消息数 / 项目 / 收藏 |
+| 🔀 | **多种排序** | 时间 / 大小 / 消息数 / 项目 |
 | 📎 | **复制 ID** | `c` 一键复制到剪贴板 |
+| 🔒 | **权限模式** | `m` 设置权限模式，`d` 一键 danger 模式恢复 |
+| 🗑️ | **删除会话** | `x` 删除不需要的会话 |
 | 🧠 | **智能 CLI** | 自动检测 `mai-claude` / `claude` |
-| 🔒 | **完全本地** | 不联网，不上传，不追踪 |
+| 🔐 | **完全本地** | 不联网，不上传，不追踪 |
 
 ## 安装
 
@@ -107,6 +96,16 @@ npm link
 
 然后运行 `claude-starter`，就这么简单。
 
+## CLI 参数
+
+```bash
+claude-starter              # 启动交互式 TUI
+claude-starter --list [N]   # 打印最近 N 个会话（默认 30）
+claude-starter --version    # 显示版本号
+claude-starter --update     # 检查并更新到最新版本
+claude-starter --help       # 显示帮助信息
+```
+
 ## 快捷键
 
 | 按键 | 功能 |
@@ -114,14 +113,15 @@ npm link
 | `↑` `↓` | 上下导航 |
 | `Enter` | 新建 / 恢复对话 |
 | `n` | 直接新建 |
-| `/` | 搜索（支持 `#tag` 和 `fav`） |
-| `f` | 收藏 / 取消收藏 ⭐ |
-| `#` | 添加 / 管理标签 🏷️ |
+| `d` | Danger 模式恢复（bypassPermissions） |
+| `m` | 权限模式选择器 |
+| `/` | 搜索 |
 | `Backspace` | 删除搜索字符，删空自动退出 |
 | `Esc` | 清空搜索 |
 | `p` | 按项目过滤 |
-| `s` | 切换排序（时间/大小/消息数/项目/收藏） |
+| `s` | 切换排序（时间/大小/消息数/项目） |
 | `c` | 复制 Session ID |
+| `x` / `Delete` | 删除会话 |
 | `Home` / `End` | 跳到顶 / 底 |
 | `Ctrl-D` / `Ctrl-U` | 翻页 |
 | `q` / `Ctrl-C` | 退出 |
@@ -164,19 +164,8 @@ Searches across **everything** — project names, Git branches, conversation con
 - `auth` → all auth-related sessions
 - `refactor` → that cleanup from last week
 - `web-app fix` → bug fixes in a specific project
-- `#bug-fix` → all sessions tagged with bug-fix
-- `fav` → all favorited sessions
 
 **No modes. No confirmation. Just type and go.**
-
-## ⭐ Favorites & 🏷️ Tags
-
-Press `f` to favorite/unfavorite, `#` to add tags.
-
-- **Favorites**: Star important sessions, sort by favorites to pin them at top
-- **Tags**: 8 built-in tags (`bug-fix`, `feature`, `refactor`, etc.) + custom tags
-- **Search integration**: Use `#tag` syntax or `fav` keyword in search
-- **Persistent**: Stored in `~/.claude/claude-starter-meta.json`, survives restarts
 
 ## Features
 
@@ -184,16 +173,16 @@ Press `f` to favorite/unfavorite, `#` to add tags.
 |---|---|---|
 | 🎨 | **Beautiful TUI** | Tokyo Night color scheme, split-pane layout, feels native in your terminal |
 | ✨ | **New Session** | Launch a fresh conversation in one keystroke |
-| 🔍 | **Instant Search** | Fuzzy search across everything, supports `#tag` and `fav` |
-| ⭐ | **Favorites** | Press `f` to star important sessions |
-| 🏷️ | **Tags** | Press `#` to categorize with built-in + custom tags |
+| 🔍 | **Instant Search** | Fuzzy search across everything |
 | 📂 | **Project Filter** | Press `p` to filter by project |
 | ⚡ | **One-Key Resume** | Arrow, Enter, you're back in the conversation |
 | 📋 | **Session Preview** | Full metadata + conversation history in the right panel |
-| 🔀 | **Sort Modes** | Sort by time, size, messages, project, or favorites |
+| 🔀 | **Sort Modes** | Sort by time, size, messages, or project |
 | 📎 | **Copy ID** | Press `c` to copy session ID |
+| 🔒 | **Permission Modes** | Press `m` to configure, `d` for quick danger-mode resume |
+| 🗑️ | **Delete Sessions** | Press `x` to remove unwanted sessions |
 | 🧠 | **Smart CLI** | Auto-detects `mai-claude` vs `claude` |
-| 🔒 | **100% Local** | No network, no telemetry, no data leaves your machine |
+| 🔐 | **100% Local** | No network, no telemetry, no data leaves your machine |
 
 ## Install
 
@@ -216,6 +205,16 @@ Then run:
 claude-starter
 ```
 
+## CLI Options
+
+```bash
+claude-starter              # Launch interactive TUI
+claude-starter --list [N]   # Print latest N sessions (default: 30)
+claude-starter --version    # Show version
+claude-starter --update     # Update to the latest version
+claude-starter --help       # Show help
+```
+
 ## Keyboard Shortcuts
 
 | Key | Action |
@@ -223,14 +222,15 @@ claude-starter
 | `↑` `↓` | Navigate sessions |
 | `Enter` | Start new / resume selected session |
 | `n` | New session |
-| `/` | Search (supports `#tag` and `fav`) |
-| `f` | Toggle favorite ⭐ |
-| `#` | Add/manage tags 🏷️ |
+| `d` | Resume with bypassPermissions (danger mode) |
+| `m` | Permission mode picker |
+| `/` | Search |
 | `Backspace` | Edit search, auto-exit when empty |
 | `Esc` | Clear filter |
 | `p` | Filter by project |
-| `s` | Cycle sort mode (time/size/messages/project/favorites) |
+| `s` | Cycle sort mode (time/size/messages/project) |
 | `c` | Copy session ID |
+| `x` / `Delete` | Delete session |
 | `Home` / `End` | Jump to first / last |
 | `Ctrl-D` / `Ctrl-U` | Page down / up |
 | `q` / `Ctrl-C` | Quit |
