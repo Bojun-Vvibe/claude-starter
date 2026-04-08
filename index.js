@@ -413,9 +413,6 @@ function createApp() {
     autoPadding: true,
   });
 
-  // Force terminal background color for light-mode terminals
-  process.stdout.write('\x1b[48;2;26;27;38m\x1b[2J');
-
   // Full-screen background box to prevent any bleed-through
   blessed.box({
     parent: screen, top: 0, left: 0, width: '100%', height: '100%',
