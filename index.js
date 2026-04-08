@@ -95,6 +95,8 @@ function loadMeta() {
   return { sessions: {} };
 }
 
+const PERMISSION_MODES = ['default', 'bypassPermissions', 'acceptEdits', 'dontAsk', 'plan', 'auto'];
+
 function saveMeta(meta) {
   try {
     fs.writeFileSync(META_FILE, JSON.stringify(meta, null, 2), 'utf-8');
@@ -115,6 +117,28 @@ function toggleFavorite(meta, sessionId) {
 function setSessionTags(meta, sessionId, tags) {
   if (!meta.sessions[sessionId]) meta.sessions[sessionId] = { favorite: false, tags: [] };
   meta.sessions[sessionId].tags = tags;
+  saveMeta(meta);
+}
+
+function getEffectivePermissionMode(meta, session) {
+  // Priority: per-session override > session's original mode from JSONL > global default
+  const sm = meta.sessions[session.sessionId];
+  if (sm && sm.permissionMode) return sm.permissionMode;
+  if (session.permissionMode) return session.permissionMode;
+  if (meta.defaultPermissionMode) return meta.defaultPermissionMode;
+  return '';
+}
+
+function setSessionPermissionMode(meta, sessionId, mode) {
+  if (!meta.sessions[sessionId]) meta.sessions[sessionId] = { favorite: false, tags: [] };
+  meta.sessions[sessionId].permissionMode = mode || undefined;
+  if (!mode) delete meta.sessions[sessionId].permissionMode;
+  saveMeta(meta);
+}
+
+function setGlobalPermissionMode(meta, mode) {
+  meta.defaultPermissionMode = mode || undefined;
+  if (!mode) delete meta.defaultPermissionMode;
   saveMeta(meta);
 }
 
@@ -156,7 +180,7 @@ function loadSessionQuick(filePath, projectName) {
   const tailStr = tailBuf.toString('utf-8');
 
   let firstTs = null, lastTs = null;
-  let version = '', gitBranch = '', cwd = '';
+  let version = '', gitBranch = '', cwd = '', permissionMode = '';
   let firstUserMsg = '';
   let userMsgCount = 0;
   let customTitle = '';
@@ -171,6 +195,7 @@ function loadSessionQuick(filePath, projectName) {
       if (!version && d.version) version = d.version;
       if (!gitBranch && d.gitBranch) gitBranch = d.gitBranch;
       if (!cwd && d.cwd) cwd = d.cwd;
+      if (!permissionMode && d.permissionMode) permissionMode = d.permissionMode;
       if (d.type === 'custom-title' && d.customTitle) customTitle = d.customTitle;
       if (d.type === 'user') {
         userMsgCount++;
@@ -209,7 +234,7 @@ function loadSessionQuick(filePath, projectName) {
   return {
     sessionId, project: projectName,
     topic: topic || '(no user messages)',
-    customTitle,
+    customTitle, permissionMode,
     firstTs, lastTs, version, gitBranch, cwd,
     fileSize: stat.size, duration: durationStr,
     estimatedMessages, filePath, _detailLoaded: false,
@@ -455,11 +480,13 @@ function createApp() {
 
   function updateFooter() {
     const keys = [
-      '{#7aa2f7-fg}{bold}↵{/} {#565f89-fg}Start/Resume{/}',
+      '{#7aa2f7-fg}{bold}↵{/} {#565f89-fg}Resume{/}',
+      '{#7aa2f7-fg}{bold}d{/} {#565f89-fg}Danger{/}',
       '{#7aa2f7-fg}{bold}n{/} {#565f89-fg}New{/}',
       '{#7aa2f7-fg}{bold}/{/} {#565f89-fg}Search{/}',
       '{#7aa2f7-fg}{bold}f{/} {#565f89-fg}Fav{/}',
       '{#7aa2f7-fg}{bold}#{/} {#565f89-fg}Tag{/}',
+      '{#7aa2f7-fg}{bold}m{/} {#565f89-fg}Mode{/}',
       '{#7aa2f7-fg}{bold}p{/} {#565f89-fg}Project{/}',
       '{#7aa2f7-fg}{bold}s{/} {#565f89-fg}Sort{/}',
       '{#7aa2f7-fg}{bold}c{/} {#565f89-fg}Copy ID{/}',
@@ -516,11 +543,13 @@ function createApp() {
       const color = getProjectColor(session.project, projectColorMap);
       const sm = getSessionMeta(meta, session.sessionId);
       const favIcon = sm.favorite ? '{#e0af68-fg}⭐{/}' : '  ';
+      const eMode = getEffectivePermissionMode(meta, session);
+      const modeIcon = (eMode === 'bypassPermissions') ? '{#f7768e-fg}!{/}' : ' ';
       const proj = `{${color}-fg}${session.project.substring(0, 12).padEnd(12)}{/}`;
       const time = `{#e0af68-fg}${formatTimestamp(session.lastTs).padEnd(16)}{/}`;
       const msgs = `{#7aa2f7-fg}${String(session.estimatedMessages).padStart(4)}{/}{#565f89-fg}m{/}`;
 
-      const fixedLen = 2 + 12 + 1 + 16 + 1 + 5 + 2 + 3;
+      const fixedLen = 2 + 1 + 12 + 1 + 16 + 1 + 5 + 2 + 3;
       const topicMaxLen = Math.max(10, listW - fixedLen);
       let topic = session.customTitle || session.topic;
 
@@ -536,7 +565,7 @@ function createApp() {
       const topicPart = display.substring(0, Math.min(topic.length, topicMaxLen));
       const tagPart = display.substring(topicPart.length);
 
-      let label = `${favIcon}${proj} ${time} ${msgs} `;
+      let label = `${favIcon}${modeIcon}${proj} ${time} ${msgs} `;
       if (session.customTitle) {
         label += `{#73daca-fg}{bold}${esc(topicPart)}{/}`;
       } else {
@@ -558,6 +587,8 @@ function createApp() {
   function renderDetail() {
     if (selectedIndex === -1) {
       const cli = CLI.name;
+      const defaultMode = meta.defaultPermissionMode || '';
+      const modeFlag = (defaultMode && defaultMode !== 'default') ? ` --permission-mode ${defaultMode}` : '';
       let c = '';
       c += `\n {#9ece6a-fg}{bold}✨ Start a New Conversation{/}\n`;
       c += ` {#414868-fg}${'─'.repeat(44)}{/}\n\n`;
@@ -565,7 +596,10 @@ function createApp() {
       c += ` {#a9b1d6-fg}coding from scratch.{/}\n\n`;
       c += ` {#565f89-fg}Working Dir{/}  {#7dcfff-fg}${process.cwd()}{/}\n`;
       c += ` {#565f89-fg}CLI{/}          {#73daca-fg}${cli}{/}\n`;
-      c += ` {#565f89-fg}Command{/}      {#565f89-fg}${cli}{/}\n\n`;
+      if (defaultMode && defaultMode !== 'default') {
+        c += ` {#565f89-fg}Mode{/}         {#f7768e-fg}${defaultMode}{/}\n`;
+      }
+      c += ` {#565f89-fg}Command{/}      {#565f89-fg}${cli}${modeFlag}{/}\n\n`;
       c += ` {#414868-fg}${'─'.repeat(44)}{/}\n`;
       c += ` {#9ece6a-fg}{bold}↵ Enter{/}{#9ece6a-fg} or {/}{#9ece6a-fg}{bold}n{/}{#9ece6a-fg} to launch{/}\n`;
       detailPanel.setContent(c);
@@ -605,6 +639,12 @@ function createApp() {
     if (session.gitBranch) fields.push(['Branch', `{#73daca-fg} ${session.gitBranch}{/}`]);
     if (session.version) fields.push(['Claude', `{#565f89-fg}v${session.version}{/}`]);
     if (session.cwd) fields.push(['Directory', `{#565f89-fg}${session.cwd}{/}`]);
+
+    const effectiveMode = getEffectivePermissionMode(meta, session);
+    if (effectiveMode && effectiveMode !== 'default') {
+      const modeColor = effectiveMode === 'bypassPermissions' ? '#f7768e' : '#e0af68';
+      fields.push(['Mode', `{${modeColor}-fg}${effectiveMode}{/}`]);
+    }
 
     for (const [label, value] of fields) {
       c += ` {#565f89-fg}${label.padEnd(12)}{/} ${value}\n`;
@@ -850,22 +890,26 @@ function createApp() {
   // ─── Resume Session ─────────────────────────────────────────────────────
   // Auto-detect: use mai-claude if available, otherwise fall back to claude
 
-  function resumeSession(session) {
+  function resumeSession(session, modeOverride) {
     screen.destroy();
 
     const label = CLI.name;
+    const mode = modeOverride || getEffectivePermissionMode(meta, session);
+    const modeFlag = (mode && mode !== 'default') ? ` --permission-mode ${mode}` : '';
 
     console.log(`\n\x1b[36m⚡ Resuming conversation with ${label}\x1b[0m`);
     console.log(`\x1b[90m   Session: ${session.sessionId}\x1b[0m`);
-    console.log(`\x1b[90m   Project: ${session.project}  │  Branch: ${session.gitBranch || 'N/A'}  │  Messages: ${session.estimatedMessages}\x1b[0m\n`);
+    console.log(`\x1b[90m   Project: ${session.project}  │  Branch: ${session.gitBranch || 'N/A'}  │  Messages: ${session.estimatedMessages}\x1b[0m`);
+    if (mode && mode !== 'default') console.log(`\x1b[33m   Mode: ${mode}\x1b[0m`);
+    console.log('');
 
     const child = spawn(
-      `${CLI.cmd} --resume ${session.sessionId}`,
+      `${CLI.cmd} --resume ${session.sessionId}${modeFlag}`,
       { stdio: 'inherit', cwd: session.cwd || process.cwd(), shell: true },
     );
     child.on('error', (err) => {
       console.error(`\x1b[31mFailed to resume: ${err.message}\x1b[0m`);
-      console.log(`\x1b[33mManual: ${label} --resume ${session.sessionId}\x1b[0m`);
+      console.log(`\x1b[33mManual: ${label} --resume ${session.sessionId}${modeFlag}\x1b[0m`);
       process.exit(1);
     });
     child.on('exit', (code) => process.exit(code || 0));
@@ -875,10 +919,15 @@ function createApp() {
     screen.destroy();
 
     const label = CLI.name;
+    const mode = meta.defaultPermissionMode || '';
+    const modeFlag = (mode && mode !== 'default') ? ` --permission-mode ${mode}` : '';
 
-    console.log(`\n\x1b[36m✨ Starting new conversation with ${label}\x1b[0m\n`);
+    console.log(`\n\x1b[36m✨ Starting new conversation with ${label}\x1b[0m`);
+    if (mode && mode !== 'default') console.log(`\x1b[33m   Mode: ${mode}\x1b[0m`);
+    console.log('');
 
-    const child = spawn(CLI.cmd, { stdio: 'inherit', cwd: process.cwd(), shell: true });
+    const cmd = modeFlag ? `${CLI.cmd}${modeFlag}` : CLI.cmd;
+    const child = spawn(cmd, { stdio: 'inherit', cwd: process.cwd(), shell: true });
     child.on('error', (err) => {
       console.error(`\x1b[31mFailed to start: ${err.message}\x1b[0m`);
       process.exit(1);
@@ -1043,6 +1092,117 @@ function createApp() {
       renderAll();
     });
   }
+
+  // ─── Permission Mode Picker ──────────────────────────────────────────────
+  function showPermissionModePicker(session) {
+    const currentSessionMode = (meta.sessions[session.sessionId] && meta.sessions[session.sessionId].permissionMode) || '';
+    const currentGlobalMode = meta.defaultPermissionMode || '';
+    const effectiveMode = getEffectivePermissionMode(meta, session);
+
+    const items = [
+      '  {#bb9af7-fg}{bold}── Session Override ──{/}',
+      ...PERMISSION_MODES.map(m => {
+        const checked = currentSessionMode === m ? '{#9ece6a-fg}✓{/}' : ' ';
+        const label = m === 'default' ? 'default (none)' : m;
+        return `  ${checked} {#a9b1d6-fg}${label}{/}`;
+      }),
+      '  {#7aa2f7-fg}{bold}Clear session override{/}',
+      '',
+      '  {#bb9af7-fg}{bold}── Global Default ──{/}',
+      ...PERMISSION_MODES.map(m => {
+        const checked = currentGlobalMode === m ? '{#9ece6a-fg}✓{/}' : ' ';
+        const label = m === 'default' ? 'default (none)' : m;
+        return `  ${checked} {#a9b1d6-fg}${label}{/}`;
+      }),
+      '  {#7aa2f7-fg}{bold}Clear global default{/}',
+    ];
+
+    const popup = blessed.list({
+      parent: screen, top: 'center', left: 'center',
+      width: 42,
+      height: Math.min(items.length + 4, 24),
+      label: ' {bold}{#bb9af7-fg}Permission Mode{/} ',
+      tags: true, border: { type: 'line' },
+      style: {
+        border: { fg: '#bb9af7' }, bg: '#24283b', fg: '#a9b1d6',
+        selected: { bg: '#3d59a1', fg: 'white', bold: true },
+        label: { fg: '#bb9af7' },
+      },
+      items: items, keys: true, vi: true, mouse: true,
+    });
+    popupOpen = true;
+    popup.focus(); screen.render();
+
+    // Section header indices (0-indexed)
+    const sessionHeaderIdx = 0;
+    const sessionClearIdx = PERMISSION_MODES.length + 1;
+    const spacerIdx = sessionClearIdx + 1;
+    const globalHeaderIdx = spacerIdx + 1;
+    const globalClearIdx = globalHeaderIdx + PERMISSION_MODES.length + 1;
+
+    popup.on('select', (item, index) => {
+      // Skip headers and spacer
+      if (index === sessionHeaderIdx || index === globalHeaderIdx || index === spacerIdx) return;
+
+      if (index === sessionClearIdx) {
+        // Clear session override
+        setSessionPermissionMode(meta, session.sessionId, '');
+        footer.setContent(`\n  {#9ece6a-fg}{bold}✓ Session mode override cleared{/}`);
+        popup.destroy(); popupOpen = false; renderAll();
+        setTimeout(() => { updateFooter(); screen.render(); }, 1500);
+        return;
+      }
+
+      if (index === globalClearIdx) {
+        // Clear global default
+        setGlobalPermissionMode(meta, '');
+        footer.setContent(`\n  {#9ece6a-fg}{bold}✓ Global default mode cleared{/}`);
+        popup.destroy(); popupOpen = false; renderAll();
+        setTimeout(() => { updateFooter(); screen.render(); }, 1500);
+        return;
+      }
+
+      // Session mode selection (indices 1 to PERMISSION_MODES.length)
+      if (index > sessionHeaderIdx && index <= sessionClearIdx - 1) {
+        const mode = PERMISSION_MODES[index - 1];
+        setSessionPermissionMode(meta, session.sessionId, mode === 'default' ? '' : mode);
+        footer.setContent(`\n  {#9ece6a-fg}{bold}✓ Session mode:{/} {#bb9af7-fg}${mode}{/}`);
+        popup.destroy(); popupOpen = false; renderAll();
+        setTimeout(() => { updateFooter(); screen.render(); }, 1500);
+        return;
+      }
+
+      // Global mode selection
+      if (index > globalHeaderIdx && index <= globalClearIdx - 1) {
+        const mode = PERMISSION_MODES[index - globalHeaderIdx - 1];
+        setGlobalPermissionMode(meta, mode === 'default' ? '' : mode);
+        footer.setContent(`\n  {#9ece6a-fg}{bold}✓ Global default:{/} {#bb9af7-fg}${mode}{/}`);
+        popup.destroy(); popupOpen = false; renderAll();
+        setTimeout(() => { updateFooter(); screen.render(); }, 1500);
+        return;
+      }
+    });
+
+    popup.key(['escape', 'q'], () => {
+      popup.destroy();
+      popupOpen = false;
+      renderAll();
+    });
+  }
+
+  // ─── Quick dangerous resume (d key) ────────────────────────────────────
+  screen.key(['d'], () => {
+    if (isSearchMode || popupOpen) return;
+    if (selectedIndex < 0 || selectedIndex >= filteredSessions.length) return;
+    resumeSession(filteredSessions[selectedIndex], 'bypassPermissions');
+  });
+
+  // ─── Permission mode picker (m key) ───────────────────────────────────
+  screen.key(['m'], () => {
+    if (isSearchMode || popupOpen) return;
+    if (selectedIndex < 0 || selectedIndex >= filteredSessions.length) return;
+    showPermissionModePicker(filteredSessions[selectedIndex]);
+  });
 
   screen.key(['s'], () => { if (!isSearchMode) cycleSort(); });
   screen.key(['p'], () => { if (!isSearchMode) showProjectPicker(); });
