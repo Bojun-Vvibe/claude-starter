@@ -410,14 +410,12 @@ function createApp() {
     fastCSR: false,
     title: 'Claude Starter',
     fullUnicode: true,
-    autoPadding: true,
+    autoPadding: false,
   });
 
-  // Full-screen background box to prevent any bleed-through
-  blessed.box({
-    parent: screen, top: 0, left: 0, width: '100%', height: '100%',
-    style: { bg: '#1a1b26' },
-  });
+  // Fill entire alternate screen buffer with dark bg (covers edges/gaps)
+  // \x1b[48;2;R;G;Bm = set bg to RGB, \x1b[2J = clear screen with that bg
+  screen.program.write('\x1b[48;2;26;27;38m\x1b[2J\x1b[0;0H');
 
   // ─── Header ────────────────────────────────────────────────────────────
   const header = blessed.box({
