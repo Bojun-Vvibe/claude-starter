@@ -921,6 +921,37 @@ function createApp() {
 
 
   // ─── Permission Mode Picker ──────────────────────────────────────────────
+
+  function showResumeConfirm(session) {
+    const mode = getEffectivePermissionMode(meta, session);
+    const modeLabel = (mode && mode !== 'default') ? `{#bb9af7-fg}${mode}{/}` : '{#565f89-fg}default{/}';
+    const confirmPopup = blessed.box({
+      parent: screen, top: 'center', left: 'center',
+      width: 44, height: 7,
+      label: ' {bold}{#9ece6a-fg}Resume?{/} ',
+      tags: true, border: { type: 'line' },
+      style: {
+        border: { fg: '#9ece6a' }, bg: '#24283b', fg: '#a9b1d6',
+        label: { fg: '#9ece6a' },
+      },
+      content: `\n  Mode: ${modeLabel}\n\n  {#9ece6a-fg}{bold}Enter{/}{#a9b1d6-fg} Resume  {/}{#565f89-fg}Esc{/}{#a9b1d6-fg} Cancel{/}`,
+    });
+    popupOpen = true;
+    confirmPopup.focus();
+    screen.render();
+
+    confirmPopup.key(['enter', 'return'], () => {
+      confirmPopup.destroy();
+      popupOpen = false;
+      resumeSession(session);
+    });
+    confirmPopup.key(['escape', 'q'], () => {
+      confirmPopup.destroy();
+      popupOpen = false;
+      renderAll();
+    });
+  }
+
   function showPermissionModePicker(session) {
     const currentSessionMode = (meta.sessions[session.sessionId] && meta.sessions[session.sessionId].permissionMode) || '';
     const currentGlobalMode = meta.defaultPermissionMode || '';
@@ -974,18 +1005,16 @@ function createApp() {
       if (index === sessionClearIdx) {
         // Clear session override
         setSessionPermissionMode(meta, session.sessionId, '');
-        footer.setContent(`\n  {#9ece6a-fg}{bold}✓ Session mode override cleared{/}`);
         popup.destroy(); popupOpen = false; renderAll();
-        setTimeout(() => { updateFooter(); screen.render(); }, 1500);
+        showResumeConfirm(session);
         return;
       }
 
       if (index === globalClearIdx) {
         // Clear global default
         setGlobalPermissionMode(meta, '');
-        footer.setContent(`\n  {#9ece6a-fg}{bold}✓ Global default mode cleared{/}`);
         popup.destroy(); popupOpen = false; renderAll();
-        setTimeout(() => { updateFooter(); screen.render(); }, 1500);
+        showResumeConfirm(session);
         return;
       }
 
@@ -993,9 +1022,8 @@ function createApp() {
       if (index > sessionHeaderIdx && index <= sessionClearIdx - 1) {
         const mode = PERMISSION_MODES[index - 1];
         setSessionPermissionMode(meta, session.sessionId, mode === 'default' ? '' : mode);
-        footer.setContent(`\n  {#9ece6a-fg}{bold}✓ Session mode:{/} {#bb9af7-fg}${mode}{/}`);
         popup.destroy(); popupOpen = false; renderAll();
-        setTimeout(() => { updateFooter(); screen.render(); }, 1500);
+        showResumeConfirm(session);
         return;
       }
 
@@ -1003,9 +1031,8 @@ function createApp() {
       if (index > globalHeaderIdx && index <= globalClearIdx - 1) {
         const mode = PERMISSION_MODES[index - globalHeaderIdx - 1];
         setGlobalPermissionMode(meta, mode === 'default' ? '' : mode);
-        footer.setContent(`\n  {#9ece6a-fg}{bold}✓ Global default:{/} {#bb9af7-fg}${mode}{/}`);
         popup.destroy(); popupOpen = false; renderAll();
-        setTimeout(() => { updateFooter(); screen.render(); }, 1500);
+        showResumeConfirm(session);
         return;
       }
     });
