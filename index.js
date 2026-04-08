@@ -411,6 +411,14 @@ function createApp() {
     title: 'Claude Starter',
     fullUnicode: true,
     autoPadding: true,
+  });
+
+  // Force terminal background color for light-mode terminals
+  process.stdout.write('\x1b[48;2;26;27;38m\x1b[2J');
+
+  // Full-screen background box to prevent any bleed-through
+  blessed.box({
+    parent: screen, top: 0, left: 0, width: '100%', height: '100%',
     style: { bg: '#1a1b26' },
   });
 
@@ -847,6 +855,7 @@ function createApp() {
   // Auto-detect: use mai-claude if available, otherwise fall back to claude
 
   function resumeSession(session, modeOverride) {
+    process.stdout.write('\x1b[0m');
     screen.destroy();
 
     const label = CLI.name;
@@ -872,6 +881,7 @@ function createApp() {
   }
 
   function startNewSession() {
+    process.stdout.write('\x1b[0m');
     screen.destroy();
 
     const label = CLI.name;
@@ -1069,7 +1079,7 @@ function createApp() {
     if (isSearchMode) { isSearchMode = false; filterText = ''; applyFilter(); return; }
     filterText = ''; selectedIndex = -1; applyFilter();
   });
-  screen.key(['q', 'C-c'], () => { screen.destroy(); process.exit(0); });
+  screen.key(['q', 'C-c'], () => { process.stdout.write('\x1b[0m'); screen.destroy(); process.exit(0); });
 
   // Remove blessed's built-in wheel handlers (they call select which changes selection)
   listPanel.removeAllListeners('element wheeldown');
