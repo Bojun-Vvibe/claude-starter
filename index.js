@@ -128,11 +128,34 @@ function setGlobalPermissionMode(meta, mode) {
 // ─── Data Layer ──────────────────────────────────────────────────────────────
 
 function getProjectDisplayName(dirName) {
-  return dirName
-    .replace(/-Users-[^-]+-Desktop-MSProject-/, '')
-    .replace(/-Users-[^-]+-Desktop-/, '')
-    .replace(/-Users-[^-]+/, '~')
-    .replace(/^-/, '') || '~';
+  // Claude stores projects as path with `-` separators, e.g.:
+  //   -Users-bob-Desktop-MSProject-my-app
+  //   -Users-bob-Projects-Router-Maestro
+  //   -Users-bob-Desktop-GraphConnector
+  //   -Users-bob
+  //
+  // Strategy: strip the user home prefix, then take the last meaningful path segment.
+  // This gives clean names like "my-app", "Router-Maestro", "GraphConnector".
+
+  // Remove leading -Users-<username> prefix
+  let name = dirName.replace(/^-Users-[^-]+/, '');
+
+  // If nothing left, it was just the home dir
+  if (!name || name === '-') return '~';
+
+  // Remove leading dash
+  name = name.replace(/^-/, '');
+
+  // Get the last path segment (split by common directory markers)
+  // e.g. "Desktop-MSProject-my-app" → "my-app"
+  //      "Desktop-GraphConnector" → "GraphConnector"
+  //      "Projects-Router-Maestro" → "Router-Maestro"
+  const knownPrefixes = /^(Desktop|Documents|Projects|Downloads|dev|src|code|repos|work|home)(?:-|$)/i;
+  while (knownPrefixes.test(name)) {
+    name = name.replace(/^[^-]+-?/, '');
+  }
+
+  return name || dirName.split('-').pop() || '~';
 }
 
 function loadSessionQuick(filePath, projectName) {
@@ -383,7 +406,8 @@ function createApp() {
 
   // ─── Screen ────────────────────────────────────────────────────────────
   const screen = blessed.screen({
-    smartCSR: true,
+    smartCSR: false,
+    fastCSR: false,
     title: 'Claude Starter',
     fullUnicode: true,
     autoPadding: true,
@@ -396,10 +420,10 @@ function createApp() {
   });
 
   function updateHeader() {
-    const title = '{bold}{#7aa2f7-fg}🚀 Claude Starter{/}';
+    const title = '{bold}{#7aa2f7-fg}Claude Starter{/}';
     const count = `{#9ece6a-fg}${filteredSessions.length}{/}{#565f89-fg}/${allSessions.length} sessions{/}`;
     const proj = `{#bb9af7-fg}${uniqueProjects.length}{/}{#565f89-fg} projects{/}`;
-    const sort = `{#73daca-fg}↕${sortMode}{/}`;
+    const sort = `{#73daca-fg}[${sortMode}]{/}`;
     const search = isSearchMode
       ? `{#e0af68-fg}/ ${filterText}▌{/}`
       : (filterText ? `{#e0af68-fg}/ ${filterText}{/}` : '');
@@ -483,7 +507,7 @@ function createApp() {
       const branch = session.gitBranch
         ? `{#73daca-fg}${session.gitBranch.substring(0, 25)}{/}`
         : '';
-      const dur = session.duration ? `{#565f89-fg}⏱${session.duration}{/}` : '';
+      const dur = session.duration ? `{#565f89-fg}${session.duration}{/}` : '';
 
       // Compose a multi-line string for each list item.
       // blessed.list renders each item as a single row, so we pack info densely.
@@ -504,7 +528,7 @@ function createApp() {
 
   // ─── Populate list ─────────────────────────────────────────────────────
   // Index 0 = "New Session", index 1+ = sessions
-  const NEW_SESSION_LABEL = ' {#9ece6a-fg}{bold}✨ New Conversation{/}';
+  const NEW_SESSION_LABEL = ' {#9ece6a-fg}{bold}+ New Conversation{/}';
 
   function refreshList() {
     const listW = Math.floor((screen.width || 100) / 2) - 2;
@@ -547,7 +571,7 @@ function createApp() {
       const defaultMode = meta.defaultPermissionMode || '';
       const modeFlag = (defaultMode && defaultMode !== 'default') ? ` --permission-mode ${defaultMode}` : '';
       let c = '';
-      c += `\n {#9ece6a-fg}{bold}✨ Start a New Conversation{/}\n`;
+      c += `\n {#9ece6a-fg}{bold}Start a New Conversation{/}\n`;
       c += ` {#414868-fg}${'─'.repeat(44)}{/}\n\n`;
       c += ` {#a9b1d6-fg}Open a fresh Claude session and start{/}\n`;
       c += ` {#a9b1d6-fg}coding from scratch.{/}\n\n`;
@@ -579,7 +603,7 @@ function createApp() {
     // Title
     c += `\n {${color}-fg}{bold}█ ${session.project}{/}\n`;
     if (session.customTitle) {
-      c += ` {#73daca-fg}{bold}📌 ${esc(session.customTitle)}{/}\n`;
+      c += ` {#73daca-fg}{bold}${esc(session.customTitle)}{/}\n`;
     }
     c += sep + '\n\n';
 
@@ -612,7 +636,7 @@ function createApp() {
       if (session.toolsUsed.length > 10) c += ` {#565f89-fg}+${session.toolsUsed.length - 10} more{/}\n`;
     }
 
-    c += `\n {#bb9af7-fg}{bold}💬 Conversation{/}\n`;
+    c += `\n {#bb9af7-fg}{bold}Conversation{/}\n`;
     c += sep + '\n';
 
     const msgs = (session.userMessages || []).slice(0, 10);
@@ -624,11 +648,11 @@ function createApp() {
       msgs.forEach((msg, i) => {
         const clean = esc(msg.replace(/\n/g, ' ').trim());
         const trunc = clean.length > 80 ? clean.substring(0, 80) + '…' : clean;
-        c += `\n {#7aa2f7-fg}{bold}You ❯{/} ${trunc}\n`;
+        c += `\n {#7aa2f7-fg}{bold}You >{/} ${trunc}\n`;
         if (assists[i]) {
           const aClean = esc(assists[i].replace(/\n/g, ' ').trim());
           const aTrunc = aClean.length > 80 ? aClean.substring(0, 80) + '…' : aClean;
-          c += ` {#9ece6a-fg}Claude ❯{/} {#565f89-fg}${aTrunc}{/}\n`;
+          c += ` {#9ece6a-fg}Claude >{/} {#565f89-fg}${aTrunc}{/}\n`;
         }
       });
     }
