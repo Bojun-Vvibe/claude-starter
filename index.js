@@ -410,12 +410,12 @@ function createApp() {
     fastCSR: false,
     title: 'Claude Starter',
     fullUnicode: true,
-    autoPadding: false,
+    autoPadding: true,
+    dockBorders: true,
   });
 
-  // Fill entire alternate screen buffer with dark bg (covers edges/gaps)
-  // \x1b[48;2;R;G;Bm = set bg to RGB, \x1b[2J = clear screen with that bg
-  screen.program.write('\x1b[48;2;26;27;38m\x1b[2J\x1b[0;0H');
+  // Force screen-level fill color so no terminal bg leaks through
+  screen.style = { bg: 234 };  // 234 = xterm color closest to #1a1b26
 
   // ─── Header ────────────────────────────────────────────────────────────
   const header = blessed.box({
