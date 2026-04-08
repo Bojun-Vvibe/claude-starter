@@ -1016,8 +1016,9 @@ function createApp() {
       if (index === globalClearIdx) {
         // Clear global default
         setGlobalPermissionMode(meta, '');
+        footer.setContent(`\n  {#9ece6a-fg}{bold}> Global default mode cleared{/}`);
         popup.destroy(); popupOpen = false; renderAll();
-        showResumeConfirm(session);
+        setTimeout(() => { updateFooter(); screen.render(); }, 1500);
         return;
       }
 
@@ -1034,8 +1035,9 @@ function createApp() {
       if (index > globalHeaderIdx && index <= globalClearIdx - 1) {
         const mode = PERMISSION_MODES[index - globalHeaderIdx - 1];
         setGlobalPermissionMode(meta, mode === 'default' ? '' : mode);
+        footer.setContent(`\n  {#9ece6a-fg}{bold}> Global default:{/} {#bb9af7-fg}${mode}{/}`);
         popup.destroy(); popupOpen = false; renderAll();
-        showResumeConfirm(session);
+        setTimeout(() => { updateFooter(); screen.render(); }, 1500);
         return;
       }
     });
