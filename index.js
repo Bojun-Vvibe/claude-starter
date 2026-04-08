@@ -411,6 +411,7 @@ function createApp() {
     title: 'Claude Starter',
     fullUnicode: true,
     autoPadding: true,
+    style: { bg: '#1a1b26' },
   });
 
   // ─── Header ────────────────────────────────────────────────────────────
@@ -433,7 +434,7 @@ function createApp() {
     header.setContent(`\n ${parts.join(' {#414868-fg}│{/} ')}`);
   }
 
-  blessed.line({ parent: screen, top: 3, left: 0, width: '100%', orientation: 'horizontal', style: { fg: '#414868' } });
+  blessed.line({ parent: screen, top: 3, left: 0, width: '100%', orientation: 'horizontal', style: { fg: '#414868', bg: '#1a1b26' } });
 
   // ─── Left Panel: blessed.list for correct scroll tracking ──────────────
   const listPanel = blessed.list({
@@ -454,7 +455,7 @@ function createApp() {
     interactive: true,
   });
 
-  blessed.line({ parent: screen, top: 4, left: '50%', height: '100%-7', orientation: 'vertical', style: { fg: '#414868' } });
+  blessed.line({ parent: screen, top: 4, left: '50%', height: '100%-7', orientation: 'vertical', style: { fg: '#414868', bg: '#1a1b26' } });
 
   // ─── Right Panel ───────────────────────────────────────────────────────
   const detailPanel = blessed.box({
@@ -466,7 +467,7 @@ function createApp() {
     mouse: true,
   });
 
-  blessed.line({ parent: screen, bottom: 2, left: 0, width: '100%', orientation: 'horizontal', style: { fg: '#414868' } });
+  blessed.line({ parent: screen, bottom: 2, left: 0, width: '100%', orientation: 'horizontal', style: { fg: '#414868', bg: '#1a1b26' } });
 
   // ─── Footer ────────────────────────────────────────────────────────────
   const footer = blessed.box({
