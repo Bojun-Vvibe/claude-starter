@@ -59,8 +59,19 @@ claude-starter
 - `auth` → 所有认证相关的对话
 - `refactor` → 上周的代码重构
 - `web-app fix` → 某个项目的 bug 修复
+- `#bug-fix` → 所有打了 bug-fix 标签的对话
+- `fav` → 所有收藏的对话
 
 **不需要管理模式，不需要确认。输入即搜，方向键即走。**
+
+## ⭐ 收藏 & 🏷️ 标签 — 组织你的对话
+
+按 `f` 收藏/取消收藏，按 `#` 打标签。
+
+- **收藏**：重要的对话一键标星，排序切到 `favorites` 模式收藏置顶
+- **标签**：预设 8 种标签（`bug-fix`、`feature`、`refactor` 等），支持自定义
+- **搜索联动**：`/` 搜索支持 `#tag` 语法和 `fav` 关键字
+- **持久化**：数据存在 `~/.claude/claude-starter-meta.json`，重启不丢失
 
 ## 核心能力
 
@@ -68,11 +79,13 @@ claude-starter
 |---|---|---|
 | 🎨 | **精美 TUI** | Tokyo Night 配色，分屏布局，终端里的 App |
 | ✨ | **一键新建** | 列表顶部直接新建对话 |
-| 🔍 | **即时搜索** | `/` 全文搜索，无需回车 |
+| 🔍 | **即时搜索** | `/` 全文搜索，无需回车，支持 `#tag` 和 `fav` |
+| ⭐ | **收藏** | `f` 收藏重要对话，排序置顶 |
+| 🏷️ | **标签** | `#` 分类管理，预设 + 自定义标签 |
 | 📂 | **项目过滤** | `p` 按项目筛选 |
 | ⚡ | **秒级恢复** | 选中 → Enter → 回到对话 |
 | 📋 | **对话预览** | 右侧面板展示完整元数据和对话历史 |
-| 🔀 | **多种排序** | 时间 / 大小 / 消息数 / 项目 |
+| 🔀 | **多种排序** | 时间 / 大小 / 消息数 / 项目 / 收藏 |
 | 📎 | **复制 ID** | `c` 一键复制到剪贴板 |
 | 🧠 | **智能 CLI** | 自动检测 `mai-claude` / `claude` |
 | 🔒 | **完全本地** | 不联网，不上传，不追踪 |
@@ -101,11 +114,13 @@ npm link
 | `↑` `↓` | 上下导航 |
 | `Enter` | 新建 / 恢复对话 |
 | `n` | 直接新建 |
-| `/` | 搜索 |
+| `/` | 搜索（支持 `#tag` 和 `fav`） |
+| `f` | 收藏 / 取消收藏 ⭐ |
+| `#` | 添加 / 管理标签 🏷️ |
 | `Backspace` | 删除搜索字符，删空自动退出 |
 | `Esc` | 清空搜索 |
 | `p` | 按项目过滤 |
-| `s` | 切换排序 |
+| `s` | 切换排序（时间/大小/消息数/项目/收藏） |
 | `c` | 复制 Session ID |
 | `Home` / `End` | 跳到顶 / 底 |
 | `Ctrl-D` / `Ctrl-U` | 翻页 |
@@ -149,8 +164,19 @@ Searches across **everything** — project names, Git branches, conversation con
 - `auth` → all auth-related sessions
 - `refactor` → that cleanup from last week
 - `web-app fix` → bug fixes in a specific project
+- `#bug-fix` → all sessions tagged with bug-fix
+- `fav` → all favorited sessions
 
 **No modes. No confirmation. Just type and go.**
+
+## ⭐ Favorites & 🏷️ Tags
+
+Press `f` to favorite/unfavorite, `#` to add tags.
+
+- **Favorites**: Star important sessions, sort by favorites to pin them at top
+- **Tags**: 8 built-in tags (`bug-fix`, `feature`, `refactor`, etc.) + custom tags
+- **Search integration**: Use `#tag` syntax or `fav` keyword in search
+- **Persistent**: Stored in `~/.claude/claude-starter-meta.json`, survives restarts
 
 ## Features
 
@@ -158,11 +184,13 @@ Searches across **everything** — project names, Git branches, conversation con
 |---|---|---|
 | 🎨 | **Beautiful TUI** | Tokyo Night color scheme, split-pane layout, feels native in your terminal |
 | ✨ | **New Session** | Launch a fresh conversation in one keystroke |
-| 🔍 | **Instant Search** | Fuzzy search across everything, no Enter needed |
+| 🔍 | **Instant Search** | Fuzzy search across everything, supports `#tag` and `fav` |
+| ⭐ | **Favorites** | Press `f` to star important sessions |
+| 🏷️ | **Tags** | Press `#` to categorize with built-in + custom tags |
 | 📂 | **Project Filter** | Press `p` to filter by project |
 | ⚡ | **One-Key Resume** | Arrow, Enter, you're back in the conversation |
 | 📋 | **Session Preview** | Full metadata + conversation history in the right panel |
-| 🔀 | **Sort Modes** | Sort by time, size, messages, or project |
+| 🔀 | **Sort Modes** | Sort by time, size, messages, project, or favorites |
 | 📎 | **Copy ID** | Press `c` to copy session ID |
 | 🧠 | **Smart CLI** | Auto-detects `mai-claude` vs `claude` |
 | 🔒 | **100% Local** | No network, no telemetry, no data leaves your machine |
@@ -195,11 +223,13 @@ claude-starter
 | `↑` `↓` | Navigate sessions |
 | `Enter` | Start new / resume selected session |
 | `n` | New session |
-| `/` | Search |
+| `/` | Search (supports `#tag` and `fav`) |
+| `f` | Toggle favorite ⭐ |
+| `#` | Add/manage tags 🏷️ |
 | `Backspace` | Edit search, auto-exit when empty |
 | `Esc` | Clear filter |
 | `p` | Filter by project |
-| `s` | Cycle sort mode |
+| `s` | Cycle sort mode (time/size/messages/project/favorites) |
 | `c` | Copy session ID |
 | `Home` / `End` | Jump to first / last |
 | `Ctrl-D` / `Ctrl-U` | Page down / up |

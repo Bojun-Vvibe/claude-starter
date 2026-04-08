@@ -16,8 +16,10 @@
  *   /              Start search (fuzzy filter)
  *   Esc            Clear search / cancel
  *   p              Filter by project (popup)
- *   s              Cycle sort: time → size → messages → project
+ *   s              Cycle sort: time → size → messages → project → favorites
  *   n              Start new session
+ *   f              Toggle favorite on selected session
+ *   #              Add/remove tags on selected session
  *   Home / End     Jump to top / bottom
  *   Ctrl-D/U       Page down / up
  *   c              Copy session ID to clipboard
@@ -76,6 +78,53 @@ const PROJECT_COLORS = [
 // ─── Paths ───────────────────────────────────────────────────────────────────
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
 const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
+const META_FILE = path.join(CLAUDE_DIR, 'claude-starter-meta.json');
+
+// ─── Session Meta (favorites & tags) ────────────────────────────────────────
+// Stores user-defined metadata for sessions in a simple JSON file.
+// Schema: { "sessions": { "<sessionId>": { "favorite": bool, "tags": string[] } } }
+
+const DEFAULT_TAGS = ['bug-fix', 'feature', 'refactor', 'debug', 'review', 'config', 'docs', 'experiment'];
+
+function loadMeta() {
+  try {
+    if (fs.existsSync(META_FILE)) {
+      return JSON.parse(fs.readFileSync(META_FILE, 'utf-8'));
+    }
+  } catch (e) { /* corrupt file, start fresh */ }
+  return { sessions: {} };
+}
+
+function saveMeta(meta) {
+  try {
+    fs.writeFileSync(META_FILE, JSON.stringify(meta, null, 2), 'utf-8');
+  } catch (e) { /* silently fail */ }
+}
+
+function getSessionMeta(meta, sessionId) {
+  return meta.sessions[sessionId] || { favorite: false, tags: [] };
+}
+
+function toggleFavorite(meta, sessionId) {
+  if (!meta.sessions[sessionId]) meta.sessions[sessionId] = { favorite: false, tags: [] };
+  meta.sessions[sessionId].favorite = !meta.sessions[sessionId].favorite;
+  saveMeta(meta);
+  return meta.sessions[sessionId].favorite;
+}
+
+function setSessionTags(meta, sessionId, tags) {
+  if (!meta.sessions[sessionId]) meta.sessions[sessionId] = { favorite: false, tags: [] };
+  meta.sessions[sessionId].tags = tags;
+  saveMeta(meta);
+}
+
+function getAllUsedTags(meta) {
+  const tags = new Set();
+  for (const s of Object.values(meta.sessions)) {
+    if (s.tags) s.tags.forEach(t => tags.add(t));
+  }
+  return [...tags];
+}
 
 // ─── Data Layer ──────────────────────────────────────────────────────────────
 
@@ -110,6 +159,7 @@ function loadSessionQuick(filePath, projectName) {
   let version = '', gitBranch = '', cwd = '';
   let firstUserMsg = '';
   let userMsgCount = 0;
+  let customTitle = '';
 
   const headLines = headStr.split('\n').filter(Boolean);
   for (const line of headLines) {
@@ -121,6 +171,7 @@ function loadSessionQuick(filePath, projectName) {
       if (!version && d.version) version = d.version;
       if (!gitBranch && d.gitBranch) gitBranch = d.gitBranch;
       if (!cwd && d.cwd) cwd = d.cwd;
+      if (d.type === 'custom-title' && d.customTitle) customTitle = d.customTitle;
       if (d.type === 'user') {
         userMsgCount++;
         if (!firstUserMsg) firstUserMsg = extractUserText(d);
@@ -135,6 +186,7 @@ function loadSessionQuick(filePath, projectName) {
         const d = JSON.parse(line);
         if (d.timestamp) lastTs = d.timestamp;
         if (d.type === 'user') userMsgCount++;
+        if (d.type === 'custom-title' && d.customTitle) customTitle = d.customTitle;
       } catch (e) { /* partial line */ }
     }
   }
@@ -157,6 +209,7 @@ function loadSessionQuick(filePath, projectName) {
   return {
     sessionId, project: projectName,
     topic: topic || '(no user messages)',
+    customTitle,
     firstTs, lastTs, version, gitBranch, cwd,
     fileSize: stat.size, duration: durationStr,
     estimatedMessages, filePath, _detailLoaded: false,
@@ -189,6 +242,7 @@ function loadSessionDetail(session) {
   for (const line of lines) {
     try {
       const d = JSON.parse(line);
+      if (d.type === 'custom-title' && d.customTitle) session.customTitle = d.customTitle;
       if (d.type === 'user') {
         totalMessages++;
         const text = extractUserText(d);
@@ -242,7 +296,11 @@ function loadAllSessions() {
     for (const file of files) {
       try {
         const session = loadSessionQuick(path.join(projPath, file), projectName);
-        if (session.firstTs) sessions.push(session);
+        // Skip sessions without timestamps, without real user messages, or warmup sessions
+        if (session.firstTs
+            && session.topic !== '(no user messages)'
+            && !/^warmup$/i.test(session.topic.trim())
+        ) sessions.push(session);
       } catch (e) { /* skip */ }
     }
   }
@@ -312,6 +370,7 @@ function runListMode(limit) {
 
 function createApp() {
   const allSessions = loadAllSessions();
+  const meta = loadMeta();
   let filteredSessions = [...allSessions];
   let selectedIndex = -1;  // -1 = "New Session", 0+ = session index
   let filterText = '';
@@ -340,11 +399,17 @@ function createApp() {
     const title = '{bold}{#7aa2f7-fg}🚀 Claude Starter{/}';
     const count = `{#9ece6a-fg}${filteredSessions.length}{/}{#565f89-fg}/${allSessions.length} sessions{/}`;
     const proj = `{#bb9af7-fg}${uniqueProjects.length}{/}{#565f89-fg} projects{/}`;
+    const favCount = allSessions.filter(s => getSessionMeta(meta, s.sessionId).favorite).length;
+    const fav = favCount > 0 ? `{#e0af68-fg}⭐${favCount}{/}` : '';
     const sort = `{#73daca-fg}↕${sortMode}{/}`;
     const search = isSearchMode
       ? `{#e0af68-fg}/ ${filterText}▌{/}`
       : (filterText ? `{#e0af68-fg}/ ${filterText}{/}` : '');
-    header.setContent(`\n ${title} {#414868-fg}│{/} ${count} {#414868-fg}│{/} ${proj} {#414868-fg}│{/} ${sort}${search ? ` {#414868-fg}│{/} ${search}` : ''}`);
+    let parts = [title, count, proj];
+    if (fav) parts.push(fav);
+    parts.push(sort);
+    if (search) parts.push(search);
+    header.setContent(`\n ${parts.join(' {#414868-fg}│{/} ')}`);
   }
 
   blessed.line({ parent: screen, top: 3, left: 0, width: '100%', orientation: 'horizontal', style: { fg: '#414868' } });
@@ -393,7 +458,8 @@ function createApp() {
       '{#7aa2f7-fg}{bold}↵{/} {#565f89-fg}Start/Resume{/}',
       '{#7aa2f7-fg}{bold}n{/} {#565f89-fg}New{/}',
       '{#7aa2f7-fg}{bold}/{/} {#565f89-fg}Search{/}',
-      '{#7aa2f7-fg}{bold}↑/↓{/} {#565f89-fg}Nav{/}',
+      '{#7aa2f7-fg}{bold}f{/} {#565f89-fg}Fav{/}',
+      '{#7aa2f7-fg}{bold}#{/} {#565f89-fg}Tag{/}',
       '{#7aa2f7-fg}{bold}p{/} {#565f89-fg}Project{/}',
       '{#7aa2f7-fg}{bold}s{/} {#565f89-fg}Sort{/}',
       '{#7aa2f7-fg}{bold}c{/} {#565f89-fg}Copy ID{/}',
@@ -448,16 +514,37 @@ function createApp() {
 
     const sessionItems = filteredSessions.map((session) => {
       const color = getProjectColor(session.project, projectColorMap);
-      const proj = `{${color}-fg}${session.project.substring(0, 13).padEnd(13)}{/}`;
+      const sm = getSessionMeta(meta, session.sessionId);
+      const favIcon = sm.favorite ? '{#e0af68-fg}⭐{/}' : '  ';
+      const proj = `{${color}-fg}${session.project.substring(0, 12).padEnd(12)}{/}`;
       const time = `{#e0af68-fg}${formatTimestamp(session.lastTs).padEnd(16)}{/}`;
       const msgs = `{#7aa2f7-fg}${String(session.estimatedMessages).padStart(4)}{/}{#565f89-fg}m{/}`;
 
-      const fixedLen = 13 + 1 + 16 + 1 + 5 + 2 + 3;
-      const topicMaxLen = Math.max(15, listW - fixedLen);
-      let topic = session.topic;
-      if (topic.length > topicMaxLen) topic = topic.substring(0, topicMaxLen) + '…';
+      const fixedLen = 2 + 12 + 1 + 16 + 1 + 5 + 2 + 3;
+      const topicMaxLen = Math.max(10, listW - fixedLen);
+      let topic = session.customTitle || session.topic;
 
-      return ` ${proj} ${time} ${msgs} {#a9b1d6-fg}${esc(topic)}{/}`;
+      // Append tags inline after topic
+      const tagStr = sm.tags.length > 0
+        ? ' ' + sm.tags.map(t => `#${t}`).join(' ')
+        : '';
+
+      let display = topic + tagStr;
+      if (display.length > topicMaxLen) display = display.substring(0, topicMaxLen) + '…';
+
+      // Split display back into topic part and tag part for coloring
+      const topicPart = display.substring(0, Math.min(topic.length, topicMaxLen));
+      const tagPart = display.substring(topicPart.length);
+
+      let label = `${favIcon}${proj} ${time} ${msgs} `;
+      if (session.customTitle) {
+        label += `{#73daca-fg}{bold}${esc(topicPart)}{/}`;
+      } else {
+        label += `{#a9b1d6-fg}${esc(topicPart)}{/}`;
+      }
+      if (tagPart) label += `{#f7768e-fg}${esc(tagPart)}{/}`;
+
+      return label;
     });
 
     const items = [NEW_SESSION_LABEL, ...sessionItems];
@@ -495,10 +582,16 @@ function createApp() {
     loadSessionDetail(session);
 
     const color = getProjectColor(session.project, projectColorMap);
+    const sm = getSessionMeta(meta, session.sessionId);
     let c = '';
     const sep = ` {#414868-fg}${'─'.repeat(44)}{/}`;
 
-    c += `\n {${color}-fg}{bold}█ ${session.project}{/}\n`;
+    // Title with favorite indicator
+    const favLabel = sm.favorite ? ' {#e0af68-fg}⭐{/}' : '';
+    c += `\n {${color}-fg}{bold}█ ${session.project}{/}${favLabel}\n`;
+    if (session.customTitle) {
+      c += ` {#73daca-fg}{bold}📌 ${esc(session.customTitle)}{/}\n`;
+    }
     c += sep + '\n\n';
 
     const fields = [
@@ -515,6 +608,13 @@ function createApp() {
 
     for (const [label, value] of fields) {
       c += ` {#565f89-fg}${label.padEnd(12)}{/} ${value}\n`;
+    }
+
+    // Tags section
+    if (sm.tags.length > 0) {
+      const tagChips = sm.tags.map(t => `{#414868-fg}[{/}{#f7768e-fg}#${t}{/}{#414868-fg}]{/}`).join(' ');
+      c += `\n {#f7768e-fg}{bold}🏷️ Tags{/}\n`;
+      c += ` ${tagChips}\n`;
     }
 
     if (session.toolsUsed && session.toolsUsed.length > 0) {
@@ -570,8 +670,21 @@ function createApp() {
     } else {
       const terms = filterText.toLowerCase().split(/\s+/);
       filteredSessions = allSessions.filter(s => {
-        const haystack = [s.project, s.topic, s.gitBranch || '', s.sessionId, ...(s.userMessages || [])].join(' ').toLowerCase();
-        return terms.every(t => haystack.includes(t));
+        const sm = getSessionMeta(meta, s.sessionId);
+        const haystack = [s.project, s.topic, s.customTitle || '', s.gitBranch || '', s.sessionId, ...(s.userMessages || [])].join(' ').toLowerCase();
+
+        return terms.every(t => {
+          // #tag syntax: match against session tags
+          if (t.startsWith('#') && t.length > 1) {
+            const tagQuery = t.substring(1);
+            return sm.tags.some(tag => tag.toLowerCase().includes(tagQuery));
+          }
+          // ⭐ or "fav" keyword: match only favorited sessions
+          if (t === '⭐' || t === 'fav' || t === 'favorite' || t === 'favorites') {
+            return sm.favorite;
+          }
+          return haystack.includes(t);
+        });
       });
     }
     selectedIndex = Math.min(selectedIndex, Math.max(-1, filteredSessions.length - 1));
@@ -585,13 +698,19 @@ function createApp() {
 
   // ─── Sort ──────────────────────────────────────────────────────────────
   function cycleSort() {
-    const modes = ['time', 'size', 'messages', 'project'];
+    const modes = ['time', 'size', 'messages', 'project', 'favorites'];
     sortMode = modes[(modes.indexOf(sortMode) + 1) % modes.length];
     const sorters = {
       time: (a, b) => (new Date(b.lastTs || 0).getTime()) - (new Date(a.lastTs || 0).getTime()),
       size: (a, b) => b.fileSize - a.fileSize,
       messages: (a, b) => b.estimatedMessages - a.estimatedMessages,
       project: (a, b) => a.project.localeCompare(b.project) || (new Date(b.lastTs || 0).getTime()) - (new Date(a.lastTs || 0).getTime()),
+      favorites: (a, b) => {
+        const fa = getSessionMeta(meta, a.sessionId).favorite ? 1 : 0;
+        const fb = getSessionMeta(meta, b.sessionId).favorite ? 1 : 0;
+        if (fb !== fa) return fb - fa;  // favorites first
+        return (new Date(b.lastTs || 0).getTime()) - (new Date(a.lastTs || 0).getTime());
+      },
     };
     allSessions.sort(sorters[sortMode]);
     selectedIndex = 0;
@@ -670,14 +789,17 @@ function createApp() {
   }
 
   screen.key(['down'], () => {
+    if (popupOpen) return;
     if (isSearchMode) { isSearchMode = false; updateHeader(); screen.render(); }
     moveSelection(1);
   });
   screen.key(['up'], () => {
+    if (popupOpen) return;
     if (isSearchMode) { isSearchMode = false; updateHeader(); screen.render(); }
     moveSelection(-1);
   });
   screen.key(['home'], () => {
+    if (popupOpen) return;
     if (isSearchMode) { isSearchMode = false; }
     selectedIndex = -1;
     suppressSelectEvent = true; listPanel.select(0); suppressSelectEvent = false;
@@ -685,6 +807,7 @@ function createApp() {
     renderDetail(); updateHeader(); screen.render();
   });
   screen.key(['end'], () => {
+    if (popupOpen) return;
     if (isSearchMode) { isSearchMode = false; }
     selectedIndex = Math.max(0, filteredSessions.length - 1);
     suppressSelectEvent = true; listPanel.select(selectedIndex + 1); suppressSelectEvent = false;
@@ -692,10 +815,12 @@ function createApp() {
     renderDetail(); updateHeader(); screen.render();
   });
   screen.key(['pagedown', 'C-d'], () => {
+    if (popupOpen) return;
     if (isSearchMode) { isSearchMode = false; updateHeader(); screen.render(); }
     moveSelection(Math.floor((listPanel.height || 20) / 2));
   });
   screen.key(['pageup', 'C-u'], () => {
+    if (popupOpen) return;
     if (isSearchMode) { isSearchMode = false; updateHeader(); screen.render(); }
     moveSelection(-Math.floor((listPanel.height || 20) / 2));
   });
@@ -789,6 +914,136 @@ function createApp() {
     } catch (e) { /* silently fail */ }
   });
 
+  // Toggle favorite
+  screen.key(['f'], () => {
+    if (isSearchMode || popupOpen) return;
+    if (selectedIndex < 0 || selectedIndex >= filteredSessions.length) return;
+    const session = filteredSessions[selectedIndex];
+    const nowFav = toggleFavorite(meta, session.sessionId);
+    const icon = nowFav ? '⭐' : '☆';
+    footer.setContent(`\n  {#e0af68-fg}{bold}${icon} ${nowFav ? 'Favorited' : 'Unfavorited'}{/}`);
+    renderAll();
+    setTimeout(() => { updateFooter(); screen.render(); }, 1200);
+  });
+
+  // Tag management — handled via keypress since '#' is a shifted character
+  // that some terminal/blessed combos may not route through screen.key
+  screen.on('keypress', (ch, key) => {
+    if (ch === '#' && !isSearchMode && !popupOpen) {
+      if (selectedIndex < 0 || selectedIndex >= filteredSessions.length) return;
+      showTagPicker(filteredSessions[selectedIndex]);
+    }
+  });
+
+  function showTagPicker(session) {
+    const sm = getSessionMeta(meta, session.sessionId);
+    const currentTags = new Set(sm.tags);
+
+    // Build tag list: all known tags (defaults + used), with checkmarks for active ones
+    const usedTags = getAllUsedTags(meta);
+    const allTags = [...new Set([...DEFAULT_TAGS, ...usedTags])].sort();
+
+    const items = [
+      '  {#9ece6a-fg}{bold}+ New custom tag…{/}',
+      ...allTags.map(t => {
+        const checked = currentTags.has(t) ? '{#9ece6a-fg}✓{/}' : ' ';
+        return `  ${checked} {#f7768e-fg}#${t}{/}`;
+      }),
+    ];
+
+    const popup = blessed.list({
+      parent: screen, top: 'center', left: 'center',
+      width: Math.min(45, Math.max(...items.map(i => i.replace(/\{[^}]*\}/g, '').length)) + 8),
+      height: Math.min(items.length + 4, 20),
+      label: ' {bold}{#f7768e-fg}🏷️ Tags{/} ',
+      tags: true, border: { type: 'line' },
+      style: {
+        border: { fg: '#f7768e' }, bg: '#24283b', fg: '#a9b1d6',
+        selected: { bg: '#3d59a1', fg: 'white', bold: true },
+        label: { fg: '#f7768e' },
+      },
+      items: items, keys: true, vi: true, mouse: true,
+    });
+    popupOpen = true;
+    popup.focus(); screen.render();
+
+    popup.on('select', (item, index) => {
+      if (index === 0) {
+        // New custom tag — show input
+        popup.destroy();
+        popupOpen = false;
+        showTagInput(session);
+        return;
+      }
+      // Toggle the selected tag
+      const tagName = allTags[index - 1];
+      if (currentTags.has(tagName)) {
+        currentTags.delete(tagName);
+      } else {
+        currentTags.add(tagName);
+      }
+      setSessionTags(meta, session.sessionId, [...currentTags]);
+
+      // Refresh the popup items to show updated checkmarks
+      const refreshedItems = [
+        '  {#9ece6a-fg}{bold}+ New custom tag…{/}',
+        ...allTags.map(t => {
+          const checked = currentTags.has(t) ? '{#9ece6a-fg}✓{/}' : ' ';
+          return `  ${checked} {#f7768e-fg}#${t}{/}`;
+        }),
+      ];
+      popup.setItems(refreshedItems);
+      popup.select(index);
+      screen.render();
+    });
+
+    popup.key(['escape', 'q'], () => {
+      popup.destroy();
+      popupOpen = false;
+      renderAll();
+    });
+  }
+
+  function showTagInput(session) {
+    const inputBox = blessed.textbox({
+      parent: screen, top: 'center', left: 'center',
+      width: 40, height: 3,
+      label: ' {bold}{#f7768e-fg}New Tag{/} ',
+      tags: true, border: { type: 'line' },
+      style: {
+        border: { fg: '#f7768e' }, bg: '#24283b', fg: '#a9b1d6',
+        label: { fg: '#f7768e' },
+      },
+      inputOnFocus: true,
+    });
+    popupOpen = true;
+    inputBox.focus();
+    screen.render();
+
+    inputBox.on('submit', (value) => {
+      inputBox.destroy();
+      popupOpen = false;
+      const tagName = value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      if (tagName) {
+        const sm = getSessionMeta(meta, session.sessionId);
+        const tags = new Set(sm.tags);
+        tags.add(tagName);
+        setSessionTags(meta, session.sessionId, [...tags]);
+        footer.setContent(`\n  {#9ece6a-fg}{bold}✓ Tagged:{/} {#f7768e-fg}#${tagName}{/}`);
+        renderAll();
+        setTimeout(() => { updateFooter(); screen.render(); }, 1500);
+      } else {
+        renderAll();
+      }
+    });
+
+    inputBox.on('cancel', () => {
+      inputBox.destroy();
+      popupOpen = false;
+      renderAll();
+    });
+  }
+
   screen.key(['s'], () => { if (!isSearchMode) cycleSort(); });
   screen.key(['p'], () => { if (!isSearchMode) showProjectPicker(); });
   screen.key(['escape'], () => {
@@ -859,9 +1114,11 @@ TUI Keyboard Shortcuts:
   ↑/↓           Navigate sessions
   Enter         Start new / resume selected session
   n             Start new session
-  /             Search (fuzzy filter)
+  /             Search (fuzzy filter, supports #tag and fav)
+  f             Toggle favorite ⭐ on selected session
+  #             Add/remove tags on selected session
   p             Filter by project
-  s             Cycle sort mode
+  s             Cycle sort mode (time/size/messages/project/favorites)
   c             Copy session ID
   Home / End    Jump to top / bottom
   Ctrl-D/U      Page down / up
