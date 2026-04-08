@@ -476,11 +476,11 @@ function createApp() {
 
   function updateFooter() {
     const keys = [
-      '{#7aa2f7-fg}{bold}↵{/} {#565f89-fg}Resume{/}',
-      '{#7aa2f7-fg}{bold}d{/} {#565f89-fg}Danger{/}',
       '{#7aa2f7-fg}{bold}n{/} {#565f89-fg}New{/}',
-      '{#7aa2f7-fg}{bold}/{/} {#565f89-fg}Search{/}',
+      '{#7aa2f7-fg}{bold}↵{/} {#565f89-fg}Resume{/}',
       '{#7aa2f7-fg}{bold}m{/} {#565f89-fg}Mode{/}',
+      '{#7aa2f7-fg}{bold}d{/} {#565f89-fg}Danger{/}',
+      '{#7aa2f7-fg}{bold}/{/} {#565f89-fg}Search{/}',
       '{#7aa2f7-fg}{bold}p{/} {#565f89-fg}Project{/}',
       '{#7aa2f7-fg}{bold}s{/} {#565f89-fg}Sort{/}',
       '{#7aa2f7-fg}{bold}c{/} {#565f89-fg}Copy ID{/}',
