@@ -923,33 +923,36 @@ function createApp() {
   // ─── Permission Mode Picker ──────────────────────────────────────────────
 
   function showResumeConfirm(session) {
-    const mode = getEffectivePermissionMode(meta, session);
-    const modeLabel = (mode && mode !== 'default') ? `{#bb9af7-fg}${mode}{/}` : '{#565f89-fg}default{/}';
-    const confirmPopup = blessed.box({
-      parent: screen, top: 'center', left: 'center',
-      width: 44, height: 7,
-      label: ' {bold}{#9ece6a-fg}Resume?{/} ',
-      tags: true, border: { type: 'line' },
-      style: {
-        border: { fg: '#9ece6a' }, bg: '#24283b', fg: '#a9b1d6',
-        label: { fg: '#9ece6a' },
-      },
-      content: `\n  Mode: ${modeLabel}\n\n  {#9ece6a-fg}{bold}Enter{/}{#a9b1d6-fg} Resume  {/}{#565f89-fg}Esc{/}{#a9b1d6-fg} Cancel{/}`,
-    });
-    popupOpen = true;
-    confirmPopup.focus();
-    screen.render();
+    // Delay to avoid the Enter key from mode picker leaking into this popup
+    setTimeout(() => {
+      const mode = getEffectivePermissionMode(meta, session);
+      const modeLabel = (mode && mode !== 'default') ? `{#bb9af7-fg}${mode}{/}` : '{#565f89-fg}default{/}';
+      const confirmPopup = blessed.box({
+        parent: screen, top: 'center', left: 'center',
+        width: 44, height: 7,
+        label: ' {bold}{#9ece6a-fg}Resume?{/} ',
+        tags: true, border: { type: 'line' },
+        style: {
+          border: { fg: '#9ece6a' }, bg: '#24283b', fg: '#a9b1d6',
+          label: { fg: '#9ece6a' },
+        },
+        content: `\n  Mode: ${modeLabel}\n\n  {#9ece6a-fg}{bold}Enter{/}{#a9b1d6-fg} Resume  {/}{#565f89-fg}Esc{/}{#a9b1d6-fg} Cancel{/}`,
+      });
+      popupOpen = true;
+      confirmPopup.focus();
+      screen.render();
 
-    confirmPopup.key(['enter', 'return'], () => {
-      confirmPopup.destroy();
-      popupOpen = false;
-      resumeSession(session);
-    });
-    confirmPopup.key(['escape', 'q'], () => {
-      confirmPopup.destroy();
-      popupOpen = false;
-      renderAll();
-    });
+      confirmPopup.key(['enter', 'return'], () => {
+        confirmPopup.destroy();
+        popupOpen = false;
+        resumeSession(session);
+      });
+      confirmPopup.key(['escape', 'q'], () => {
+        confirmPopup.destroy();
+        popupOpen = false;
+        renderAll();
+      });
+    }, 50);
   }
 
   function showPermissionModePicker(session) {
