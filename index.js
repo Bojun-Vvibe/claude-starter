@@ -539,15 +539,14 @@ function createApp() {
       const modeIcon = (eMode === 'bypassPermissions') ? '{#f7768e-fg}!{/}' : ' ';
       const proj = `{${color}-fg}${session.project.substring(0, 12).padEnd(12)}{/}`;
       const time = `{#e0af68-fg}${formatTimestamp(session.lastTs).padEnd(16)}{/}`;
-      const msgs = `{#7aa2f7-fg}${String(session.estimatedMessages).padStart(4)}{/}{#565f89-fg}m{/}`;
 
-      const fixedLen = 1 + 12 + 1 + 16 + 1 + 5 + 2 + 3;
+      const fixedLen = 1 + 12 + 1 + 16 + 1 + 3;
       const topicMaxLen = Math.max(10, listW - fixedLen);
       let topic = session.customTitle || session.topic;
 
       if (topic.length > topicMaxLen) topic = topic.substring(0, topicMaxLen) + '…';
 
-      let label = `${modeIcon}${proj} ${time} ${msgs} `;
+      let label = `${modeIcon}${proj} ${time} `;
       if (session.customTitle) {
         label += `{#73daca-fg}{bold}${esc(topic)}{/}`;
       } else {
