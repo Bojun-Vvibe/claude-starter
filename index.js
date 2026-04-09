@@ -206,16 +206,27 @@ function loadSessionQuick(filePath, projectName) {
   const headBuf = Buffer.alloc(Math.min(8192, stat.size));
   fs.readSync(fd, headBuf, 0, headBuf.length, 0);
 
-  let tailBuf = Buffer.alloc(0);
+  // Read tail with progressive expansion: start at 32KB, grow up to 256KB
+  // until we find a JSON line with a top-level timestamp (to get accurate lastTs).
+  let tailStr = '';
   if (stat.size > 8192) {
-    const tailSize = Math.min(4096, stat.size - 8192);
-    tailBuf = Buffer.alloc(tailSize);
-    fs.readSync(fd, tailBuf, 0, tailSize, stat.size - tailSize);
+    const tailSizes = [32768, 65536, 131072, 262144];
+    for (const ts of tailSizes) {
+      const tailSize = Math.min(ts, stat.size - 8192);
+      const tailBuf = Buffer.alloc(tailSize);
+      fs.readSync(fd, tailBuf, 0, tailSize, stat.size - tailSize);
+      tailStr = tailBuf.toString('utf-8');
+      // Check if any parseable JSON line has a top-level timestamp
+      const hasTopLevelTs = tailStr.split('\n').some(line => {
+        try { return !!JSON.parse(line).timestamp; } catch { return false; }
+      });
+      if (hasTopLevelTs) break;
+      if (tailSize >= stat.size - 8192) break;  // already read entire file
+    }
   }
   fs.closeSync(fd);
 
   const headStr = headBuf.toString('utf-8');
-  const tailStr = tailBuf.toString('utf-8');
 
   let firstTs = null, lastTs = null;
   let version = '', gitBranch = '', cwd = '', permissionMode = '';
@@ -520,16 +531,17 @@ function createApp() {
 
   function updateFooter() {
     const keys = [
-      '{#7aa2f7-fg}{bold}n{/} {#565f89-fg}New{/}',
-      '{#7aa2f7-fg}{bold}↵{/} {#565f89-fg}Resume{/}',
-      '{#7aa2f7-fg}{bold}m{/} {#565f89-fg}Mode{/}',
-      '{#f7768e-fg}{bold}d{/} {#565f89-fg}Danger{/}',
-      '{#7aa2f7-fg}{bold}/{/} {#565f89-fg}Search{/}',
-      '{#7aa2f7-fg}{bold}p{/} {#565f89-fg}Project{/}',
-      '{#7aa2f7-fg}{bold}s{/} {#565f89-fg}Sort{/}',
-      '{#7aa2f7-fg}{bold}c{/} {#565f89-fg}Copy ID{/}',
-      '{#f7768e-fg}{bold}x{/} {#565f89-fg}Delete{/}',
-      '{#7aa2f7-fg}{bold}q{/} {#565f89-fg}Quit{/}',
+      '{#9ece6a-fg}{bold}n{/} {#9ece6a-fg}New{/}',
+      '{#7aa2f7-fg}{bold}↵{/} {#7aa2f7-fg}Resume{/}',
+      '{#bb9af7-fg}{bold}m{/} {#bb9af7-fg}Mode{/}',
+      '{#f7768e-fg}{bold}d{/} {#f7768e-fg}Danger{/}',
+      '{#e0af68-fg}{bold}/{/} {#e0af68-fg}Search{/}',
+      '{#7dcfff-fg}{bold}p{/} {#7dcfff-fg}Project{/}',
+      '{#73daca-fg}{bold}s{/} {#73daca-fg}Sort{/}',
+      '{#565f89-fg}{bold}c{/} {#565f89-fg}Copy ID{/}',
+      '{#ff9e64-fg}{bold}r{/} {#ff9e64-fg}Rename{/}',
+      '{#f7768e-fg}{bold}x{/} {#f7768e-fg}Delete{/}',
+      '{#565f89-fg}{bold}q{/} {#565f89-fg}Quit{/}',
     ];
     footer.setContent(`\n ${keys.join(' {#414868-fg}│{/} ')}`);
   }
@@ -829,17 +841,15 @@ function createApp() {
   }
 
   screen.key(['down'], () => {
-    if (popupOpen) return;
-    if (isSearchMode) { isSearchMode = false; updateHeader(); screen.render(); }
+    if (renameMode || popupOpen || isSearchMode) return;
     moveSelection(1);
   });
   screen.key(['up'], () => {
-    if (popupOpen) return;
-    if (isSearchMode) { isSearchMode = false; updateHeader(); screen.render(); }
+    if (renameMode || popupOpen || isSearchMode) return;
     moveSelection(-1);
   });
   screen.key(['home'], () => {
-    if (popupOpen) return;
+    if (renameMode || popupOpen) return;
     if (isSearchMode) { isSearchMode = false; }
     selectedIndex = -1;
     suppressSelectEvent = true; listPanel.select(0); suppressSelectEvent = false;
@@ -847,7 +857,7 @@ function createApp() {
     renderDetail(); updateHeader(); screen.render();
   });
   screen.key(['end'], () => {
-    if (popupOpen) return;
+    if (renameMode || popupOpen) return;
     if (isSearchMode) { isSearchMode = false; }
     selectedIndex = Math.max(0, filteredSessions.length - 1);
     suppressSelectEvent = true; listPanel.select(selectedIndex + 1); suppressSelectEvent = false;
@@ -855,31 +865,86 @@ function createApp() {
     renderDetail(); updateHeader(); screen.render();
   });
   screen.key(['pagedown', 'C-d'], () => {
-    if (popupOpen) return;
+    if (renameMode || popupOpen) return;
     if (isSearchMode) { isSearchMode = false; updateHeader(); screen.render(); }
     moveSelection(Math.floor((listPanel.height || 20) / 2));
   });
   screen.key(['pageup', 'C-u'], () => {
-    if (popupOpen) return;
+    if (renameMode || popupOpen) return;
     if (isSearchMode) { isSearchMode = false; updateHeader(); screen.render(); }
     moveSelection(-Math.floor((listPanel.height || 20) / 2));
   });
 
   // Search
   screen.key(['/'], () => {
-    if (isSearchMode) return;
+    if (renameMode || isSearchMode) return;
     isSearchMode = true; filterText = ''; applyFilter();
   });
 
   screen.on('keypress', (ch, key) => {
-    // Backspace: always works when there's filter text, regardless of search mode
-    if (key.name === 'backspace' && filterText) {
-      filterText = filterText.slice(0, -1);
-      selectedIndex = -1;
-      isSearchMode = !!filterText;  // exit search when empty
-      applyFilter();
+    // ── Rename mode: capture all input ──
+    if (renameMode) {
+      if (key.name === 'return' || key.name === 'enter') {
+        const session = renameSession;
+        const value = renameValue;
+        closeRename();
+        submitRename(session, value);
+        return;
+      }
+      if (key.name === 'escape') {
+        closeRename();
+        listPanel.focus();
+        screen.render();
+        return;
+      }
+      if (key.name === 'backspace') {
+        if (renameValue.length > 0) {
+          renameValue = [...renameValue].slice(0, -1).join('');
+          renderRenameInput();
+        }
+        return;
+      }
+      if (ch && ch.length >= 1 && ch.charCodeAt(0) >= 32 && !key.ctrl && !key.meta) {
+        renameValue += ch;
+        renderRenameInput();
+      }
+      return;  // swallow all keys while in rename mode
+    }
+
+    // Backspace: delete search char, or exit search mode if empty
+    if (key.name === 'backspace') {
+      if (filterText) {
+        filterText = filterText.slice(0, -1);
+        selectedIndex = -1;
+        isSearchMode = !!filterText;
+        applyFilter();
+      } else if (isSearchMode) {
+        isSearchMode = false;
+        applyFilter();
+      }
       return;
     }
+
+    // Vim-like navigation (only when NOT in search mode)
+    if (!isSearchMode && !popupOpen) {
+      if (ch === 'j') { moveSelection(1); return; }
+      if (ch === 'k') { moveSelection(-1); return; }
+      if (ch === 'G') {
+        selectedIndex = Math.max(0, filteredSessions.length - 1);
+        suppressSelectEvent = true; listPanel.select(selectedIndex + 1); suppressSelectEvent = false;
+        listPanel.childBase = Math.max(0, selectedIndex + 1 - listPanel.height + 1);
+        renderDetail(); updateHeader(); screen.render();
+        return;
+      }
+      if (ch === 'g') {
+        selectedIndex = -1;
+        suppressSelectEvent = true; listPanel.select(0); suppressSelectEvent = false;
+        listPanel.childBase = 0;
+        renderDetail(); updateHeader(); screen.render();
+        return;
+      }
+    }
+
     if (!isSearchMode) return;
     if (key.name === 'return' || key.name === 'enter') { isSearchMode = false; renderAll(); return; }
     if (key.name === 'escape') { isSearchMode = false; filterText = ''; applyFilter(); return; }
@@ -937,7 +1002,23 @@ function createApp() {
     child.on('exit', (code) => process.exit(code || 0));
   }
 
+  // Track the rename confirm popup and its session for Enter handling
+  let renameConfirmPopup = null;
+  let renameConfirmSession = null;
+
   screen.key(['enter'], () => {
+    if (renameMode) return;
+    if (renameJustFinished) return;
+    // Handle rename confirm popup Enter
+    if (renameConfirmPopup && popupOpen) {
+      const session = renameConfirmSession;
+      renameConfirmPopup.destroy();
+      renameConfirmPopup = null;
+      renameConfirmSession = null;
+      popupOpen = false;
+      resumeSession(session);
+      return;
+    }
     if (isSearchMode) { isSearchMode = false; renderAll(); return; }
     if (popupOpen) return;
     if (selectedIndex === -1) { startNewSession(); return; }
@@ -947,13 +1028,13 @@ function createApp() {
 
   // Quick shortcut: n = new session
   screen.key(['n'], () => {
-    if (isSearchMode) return;
+    if (renameMode || isSearchMode) return;
     startNewSession();
   });
 
   // Copy session ID
   screen.key(['c'], () => {
-    if (isSearchMode) return;
+    if (renameMode || isSearchMode) return;
     if (filteredSessions.length === 0) return;
     const sid = filteredSessions[selectedIndex].sessionId;
     try {
@@ -1097,14 +1178,14 @@ function createApp() {
 
   // ─── Quick dangerous resume (d key) ────────────────────────────────────
   screen.key(['d'], () => {
-    if (isSearchMode || popupOpen) return;
+    if (renameMode || isSearchMode || popupOpen) return;
     if (selectedIndex < 0 || selectedIndex >= filteredSessions.length) return;
     resumeSession(filteredSessions[selectedIndex], 'bypassPermissions');
   });
 
   // ─── Permission mode picker (m key) ───────────────────────────────────
   screen.key(['m'], () => {
-    if (isSearchMode || popupOpen) return;
+    if (renameMode || isSearchMode || popupOpen) return;
     if (selectedIndex < 0 || selectedIndex >= filteredSessions.length) return;
     showPermissionModePicker(filteredSessions[selectedIndex]);
   });
@@ -1169,18 +1250,143 @@ function createApp() {
   }
 
   screen.key(['x', 'delete'], () => {
-    if (isSearchMode || popupOpen) return;
+    if (renameMode || isSearchMode || popupOpen) return;
     if (selectedIndex < 0 || selectedIndex >= filteredSessions.length) return;
     showDeleteConfirm(filteredSessions[selectedIndex]);
   });
 
-  screen.key(['s'], () => { if (!isSearchMode) cycleSort(); });
-  screen.key(['p'], () => { if (!isSearchMode) showProjectPicker(); });
+  // ─── Rename Session ───────────────────────────────────────────────────
+  const stringWidth = require('string-width');
+  let renameMode = false;
+  let renameJustFinished = false;
+  let renameValue = '';
+  let renameSession = null;
+  let renamePopup = null;
+  let renameDisplay = null;
+  const renameMaxWidth = 46;
+
+  function renderRenameInput() {
+    let display = renameValue;
+    while (stringWidth(display) > renameMaxWidth && display.length > 0) {
+      display = display.substring(1);
+    }
+    renameDisplay.setContent(display + '▌');
+    screen.render();
+  }
+
+  function showRenameInput(session) {
+    renameSession = session;
+    renameValue = session.customTitle || '';
+
+    renamePopup = blessed.box({
+      parent: screen, top: 'center', left: 'center',
+      width: 52, height: 7,
+      label: ' {bold}{#73daca-fg}Rename Session{/} ',
+      tags: true, border: { type: 'line' },
+      style: {
+        border: { fg: '#73daca' }, bg: '#24283b', fg: '#a9b1d6',
+        label: { fg: '#73daca' },
+      },
+    });
+
+    renameDisplay = blessed.box({
+      parent: renamePopup,
+      top: 1, left: 1, right: 1, height: 1,
+      tags: false,
+      style: { fg: 'white', bg: '#1a1b26' },
+    });
+
+    blessed.box({
+      parent: renamePopup,
+      top: 3, left: 1, right: 1, height: 1,
+      tags: true,
+      style: { bg: '#24283b' },
+      content: '  {#9ece6a-fg}{bold}Enter{/}{#a9b1d6-fg} Save  {/}{#565f89-fg}Esc{/}{#a9b1d6-fg} Cancel{/}',
+    });
+
+    popupOpen = true;
+    renameMode = true;
+    renderRenameInput();
+  }
+
+  function closeRename() {
+    renameMode = false;
+    if (renamePopup) { renamePopup.destroy(); renamePopup = null; }
+    popupOpen = false;
+    renameSession = null;
+    renameDisplay = null;
+  }
+
+  function submitRename(session, newTitle) {
+    newTitle = (newTitle || '').trim();
+
+    // Save to meta
+    if (!meta.sessions[session.sessionId]) meta.sessions[session.sessionId] = {};
+    meta.sessions[session.sessionId].customTitle = newTitle || undefined;
+    if (!newTitle) delete meta.sessions[session.sessionId].customTitle;
+    saveMeta(meta);
+
+    // Update in-memory session
+    session.customTitle = newTitle;
+
+    // Also append to JSONL file so Claude Code sees it
+    if (newTitle && fs.existsSync(session.filePath)) {
+      try {
+        const entry = JSON.stringify({ type: 'custom-title', customTitle: newTitle });
+        fs.appendFileSync(session.filePath, '\n' + entry);
+      } catch (e) { /* silently fail */ }
+    }
+
+    renderAll();
+
+    // Ask whether to resume this session after rename
+    // We use renameJustFinished flag to prevent the Enter key from rename
+    // from immediately triggering resume
+    renameJustFinished = true;
+    setTimeout(() => { renameJustFinished = false; }, 200);
+
+    setTimeout(() => {
+      const titleLabel = newTitle ? `{#73daca-fg}${esc(newTitle)}{/}` : '{#565f89-fg}(title cleared){/}';
+      renameConfirmSession = session;
+      renameConfirmPopup = blessed.box({
+        parent: screen, top: 'center', left: 'center',
+        width: 48, height: 8,
+        label: ' {bold}{#9ece6a-fg}Renamed{/} ',
+        tags: true, border: { type: 'line' },
+        style: {
+          border: { fg: '#9ece6a' }, bg: '#24283b', fg: '#a9b1d6',
+          label: { fg: '#9ece6a' },
+        },
+        content: `\n  ${titleLabel}\n\n  {#9ece6a-fg}{bold}Enter{/}{#a9b1d6-fg} Resume  {/}{#565f89-fg}Esc{/}{#a9b1d6-fg} Back to list{/}`,
+      });
+      popupOpen = true;
+      renameConfirmPopup.focus();
+      screen.render();
+
+      renameConfirmPopup.key(['escape', 'q'], () => {
+        renameConfirmPopup.destroy();
+        renameConfirmPopup = null;
+        renameConfirmSession = null;
+        popupOpen = false;
+        renderAll();
+      });
+    }, 50);
+  }
+
+  screen.key(['r'], () => {
+    if (isSearchMode || popupOpen) return;
+    if (selectedIndex < 0 || selectedIndex >= filteredSessions.length) return;
+    showRenameInput(filteredSessions[selectedIndex]);
+  });
+
+  screen.key(['s'], () => { if (!renameMode && !isSearchMode) cycleSort(); });
+  screen.key(['p'], () => { if (!renameMode && !isSearchMode) showProjectPicker(); });
   screen.key(['escape'], () => {
+    if (renameMode) return;  // handled in keypress
     if (isSearchMode) { isSearchMode = false; filterText = ''; applyFilter(); return; }
     filterText = ''; selectedIndex = -1; applyFilter();
   });
-  screen.key(['q', 'C-c'], () => { process.stdout.write('\x1b[0m'); screen.destroy(); process.exit(0); });
+  screen.key(['q', 'C-c'], () => { if (renameMode) return; process.stdout.write('\x1b[0m'); screen.destroy(); process.exit(0); });
 
   // Remove blessed's built-in wheel handlers (they call select which changes selection)
   listPanel.removeAllListeners('element wheeldown');

@@ -75,7 +75,9 @@ claude-starter
 | 🔀 | **多种排序** | 时间 / 大小 / 消息数 / 项目 |
 | 📎 | **复制 ID** | `c` 一键复制到剪贴板 |
 | 🔒 | **权限模式** | `m` 设置权限模式，`d` 一键 danger 模式恢复 |
+| ✏️ | **重命名会话** | `r` 直接重命名，支持中文输入 |
 | 🗑️ | **删除会话** | `x` 删除不需要的会话 |
+| ⌨️ | **Vim 快捷键** | `j`/`k` 上下，`g`/`G` 跳顶/底 |
 | 🧠 | **智能 CLI** | 自动检测 `mai-claude` / `claude` |
 | 🔐 | **完全本地** | 不联网，不上传，不追踪 |
 
@@ -110,11 +112,12 @@ claude-starter --help       # 显示帮助信息
 
 | 按键 | 功能 |
 |:---:|------|
-| `↑` `↓` | 上下导航 |
+| `↑` `↓` / `j` `k` | 上下导航 |
 | `Enter` | 新建 / 恢复对话 |
 | `n` | 直接新建 |
 | `d` | Danger 模式恢复（bypassPermissions） |
 | `m` | 权限模式选择器 |
+| `r` | 重命名会话 |
 | `/` | 搜索 |
 | `Backspace` | 删除搜索字符，删空自动退出 |
 | `Esc` | 清空搜索 |
@@ -122,7 +125,7 @@ claude-starter --help       # 显示帮助信息
 | `s` | 切换排序（时间/大小/消息数/项目） |
 | `c` | 复制 Session ID |
 | `x` / `Delete` | 删除会话 |
-| `Home` / `End` | 跳到顶 / 底 |
+| `g` / `G` | 跳到顶 / 底 |
 | `Ctrl-D` / `Ctrl-U` | 翻页 |
 | `q` / `Ctrl-C` | 退出 |
 
@@ -180,7 +183,9 @@ Searches across **everything** — project names, Git branches, conversation con
 | 🔀 | **Sort Modes** | Sort by time, size, messages, or project |
 | 📎 | **Copy ID** | Press `c` to copy session ID |
 | 🔒 | **Permission Modes** | Press `m` to configure, `d` for quick danger-mode resume |
+| ✏️ | **Rename Sessions** | Press `r` to rename, supports CJK input |
 | 🗑️ | **Delete Sessions** | Press `x` to remove unwanted sessions |
+| ⌨️ | **Vim Keybindings** | `j`/`k` navigate, `g`/`G` jump to top/bottom |
 | 🧠 | **Smart CLI** | Auto-detects `mai-claude` vs `claude` |
 | 🔐 | **100% Local** | No network, no telemetry, no data leaves your machine |
 
@@ -219,11 +224,12 @@ claude-starter --help       # Show help
 
 | Key | Action |
 |:---:|--------|
-| `↑` `↓` | Navigate sessions |
+| `↑` `↓` / `j` `k` | Navigate sessions |
 | `Enter` | Start new / resume selected session |
 | `n` | New session |
 | `d` | Resume with bypassPermissions (danger mode) |
 | `m` | Permission mode picker |
+| `r` | Rename session |
 | `/` | Search |
 | `Backspace` | Edit search, auto-exit when empty |
 | `Esc` | Clear filter |
@@ -231,7 +237,7 @@ claude-starter --help       # Show help
 | `s` | Cycle sort mode (time/size/messages/project) |
 | `c` | Copy session ID |
 | `x` / `Delete` | Delete session |
-| `Home` / `End` | Jump to first / last |
+| `g` / `G` | Jump to top / bottom |
 | `Ctrl-D` / `Ctrl-U` | Page down / up |
 | `q` / `Ctrl-C` | Quit |
 
