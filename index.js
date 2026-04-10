@@ -447,6 +447,16 @@ function runListMode(limit) {
 function createApp() {
   const allSessions = loadAllSessions();
   const meta = loadMeta();
+
+  // Apply meta customTitles — these take priority over JSONL titles
+  // so renames persist even after continuing a conversation
+  for (const session of allSessions) {
+    const sm = meta.sessions[session.sessionId];
+    if (sm && sm.customTitle) {
+      session.customTitle = sm.customTitle;
+    }
+  }
+
   let filteredSessions = [...allSessions];
   let selectedIndex = -1;  // -1 = "New Session", 0+ = session index
   let filterText = '';
@@ -532,6 +542,16 @@ function createApp() {
   });
 
   function updateFooter() {
+    if (isSearchMode) {
+      const keys = [
+        '{#e0af68-fg}{bold}↵{/} {#e0af68-fg}Confirm{/}',
+        '{#7aa2f7-fg}{bold}↑↓{/} {#7aa2f7-fg}Navigate{/}',
+        '{#565f89-fg}{bold}⌫{/} {#565f89-fg}Delete char{/}',
+        '{#565f89-fg}{bold}Esc{/} {#565f89-fg}Clear{/}',
+      ];
+      footer.setContent(`\n ${keys.join(' {#414868-fg}│{/} ')}`);
+      return;
+    }
     const keys = [
       '{#9ece6a-fg}{bold}n{/} {#9ece6a-fg}New{/}',
       '{#7aa2f7-fg}{bold}↵{/} {#7aa2f7-fg}Resume{/}',
@@ -653,6 +673,10 @@ function createApp() {
 
     const session = filteredSessions[selectedIndex];
     loadSessionDetail(session);
+
+    // Meta customTitle takes priority over JSONL
+    const sm = meta.sessions[session.sessionId];
+    if (sm && sm.customTitle) session.customTitle = sm.customTitle;
 
     const color = getProjectColor(session.project, projectColorMap);
     let c = '';
@@ -843,11 +867,13 @@ function createApp() {
   }
 
   screen.key(['down'], () => {
-    if (renameMode || popupOpen || isSearchMode) return;
+    if (renameMode || popupOpen) return;
+    if (isSearchMode) { isSearchMode = false; updateHeader(); updateFooter(); screen.render(); }
     moveSelection(1);
   });
   screen.key(['up'], () => {
-    if (renameMode || popupOpen || isSearchMode) return;
+    if (renameMode || popupOpen) return;
+    if (isSearchMode) { isSearchMode = false; updateHeader(); updateFooter(); screen.render(); }
     moveSelection(-1);
   });
   screen.key(['home'], () => {
@@ -880,7 +906,9 @@ function createApp() {
   // Search
   screen.key(['/'], () => {
     if (renameMode || isSearchMode) return;
-    isSearchMode = true; filterText = ''; applyFilter();
+    isSearchMode = true;
+    if (!filterText) filterText = '';  // keep existing filterText if any
+    updateHeader(); updateFooter(); screen.render();
   });
 
   screen.on('keypress', (ch, key) => {
@@ -948,7 +976,7 @@ function createApp() {
     }
 
     if (!isSearchMode) return;
-    if (key.name === 'return' || key.name === 'enter') { isSearchMode = false; renderAll(); return; }
+    if (key.name === 'return' || key.name === 'enter') { isSearchMode = false; searchJustConfirmed = true; renderAll(); return; }
     if (key.name === 'escape') { isSearchMode = false; filterText = ''; applyFilter(); return; }
     // Only accept printable characters (exclude control chars like \r \n \t)
     if (ch && ch.length === 1 && ch.charCodeAt(0) >= 32 && !key.ctrl && !key.meta) { filterText += ch; selectedIndex = -1; applyFilter(); }
@@ -1007,10 +1035,12 @@ function createApp() {
   // Track the rename confirm popup and its session for Enter handling
   let renameConfirmPopup = null;
   let renameConfirmSession = null;
+  let searchJustConfirmed = false;
 
   screen.key(['enter'], () => {
     if (renameMode) return;
     if (renameJustFinished) return;
+    if (searchJustConfirmed) { searchJustConfirmed = false; return; }
     // Handle rename confirm popup Enter
     if (renameConfirmPopup && popupOpen) {
       const session = renameConfirmSession;
