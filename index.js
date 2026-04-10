@@ -35,77 +35,7 @@ const path = require('path');
 const { spawn, execSync } = require('child_process');
 const os = require('os');
 
-// ─── CLI Detection ──────────────────────────────────────────────────────────
-// Detect whether `mai-claude` is available (binary, alias, or function).
-// First checks PATH directly, then sources shell config non-interactively
-// to resolve aliases.  Falls back to plain `claude`.
-//
-// NOTE: We deliberately avoid `shell -i` (interactive mode) because it
-// triggers SIGTTOU in terminals like Warp that strictly manage TTY process
-// groups, causing `suspended (tty output)`.
-//
-// Returns { name, cmd } where:
-//   name = display label ("mai-claude" or "claude")
-//   cmd  = the actual command string to spawn (resolves aliases)
-
-function detectCLI() {
-  // Strategy:
-  // 1. First try non-interactive lookup (safe for all terminals including Warp)
-  // 2. Only fall back to interactive shell if needed for alias resolution
-  //
-  // IMPORTANT: avoid `shell -i` (interactive mode) — it can trigger SIGTTOU
-  // in terminals like Warp that strictly manage TTY process groups, causing
-  // the process to be suspended with "suspended (tty output)".
-
-  const shell = process.env.SHELL || '/bin/sh';
-
-  // 1) Non-interactive: check if mai-claude exists as a binary on PATH
-  try {
-    const binPath = execSync('command -v mai-claude 2>/dev/null', {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 3000,
-      shell: true,
-    }).toString().trim();
-    if (binPath) {
-      return { name: 'mai-claude', cmd: 'mai-claude' };
-    }
-  } catch { /* not found as binary, continue */ }
-
-  // 2) Source shell config non-interactively to resolve aliases/functions.
-  //    This avoids `-i` which would try to claim the TTY and risk SIGTTOU.
-  try {
-    const isZsh = shell.endsWith('/zsh');
-    const rcFile = isZsh
-      ? path.join(os.homedir(), '.zshrc')
-      : path.join(os.homedir(), '.bashrc');
-
-    if (fs.existsSync(rcFile)) {
-      const raw = execSync(
-        `${shell} -c 'source "${rcFile}" 2>/dev/null; command -v mai-claude 2>/dev/null'`,
-        {
-          stdio: ['pipe', 'pipe', 'pipe'],
-          timeout: 3000,
-          env: { ...process.env, PS1: '', PROMPT: '', NO_TTY: '1' },
-        },
-      ).toString().trim();
-
-      if (raw) {
-        const lines = raw.split('\n');
-        const aliasLine = lines.find(l => l.startsWith('alias ')) || lines[lines.length - 1];
-
-        const aliasMatch = aliasLine.match(/^alias [^=]+=(?:'(.+)'|"(.+)")$/s);
-        if (aliasMatch) {
-          return { name: 'mai-claude', cmd: aliasMatch[1] || aliasMatch[2] };
-        }
-        return { name: 'mai-claude', cmd: 'mai-claude' };
-      }
-    }
-  } catch { /* alias resolution failed, fall back to claude */ }
-
-  return { name: 'claude', cmd: 'claude' };
-}
-
-const CLI = detectCLI();
+const CLI = { name: 'claude', cmd: 'claude' };
 
 // ─── Color Palette (Tokyo Night) ─────────────────────────────────────────────
 const PROJECT_COLORS = [
@@ -433,10 +363,10 @@ function runListMode(limit) {
   };
   console.log(`\n${C.cyan}${C.bold}🚀 Claude Sessions${C.reset} ${C.dim}(${sessions.length} total, showing ${display.length})${C.reset}\n`);
   console.log(`${C.dim}${'─'.repeat(100)}${C.reset}`);
-  console.log(`${C.bold}${'#'.padStart(3)}  ${'Time'.padEnd(18)} ${'Project'.padEnd(18)} ${'Branch'.padEnd(22)} ${'Msgs'.padStart(5)}  ${'Size'.padStart(6)}  Topic${C.reset}`);
-  console.log(`${C.dim}${'─'.repeat(100)}${C.reset}`);
+  console.log(`${C.bold}${'#'.padStart(3)}  ${'Time'.padEnd(18)} ${'Project'.padEnd(25)} ${'Branch'.padEnd(28)} ${'Msgs'.padStart(5)}  ${'Size'.padStart(6)}  Topic${C.reset}`);
+  console.log(`${C.dim}${'─'.repeat(110)}${C.reset}`);
   display.forEach((s, i) => {
-    console.log(`${C.dim}${`${i+1}`.padStart(3)}${C.reset}  ${C.yellow}${formatTimestamp(s.lastTs).padEnd(18)}${C.reset} ${C.magenta}${s.project.substring(0,17).padEnd(18)}${C.reset} ${C.green}${(s.gitBranch||'').substring(0,21).padEnd(22)}${C.reset} ${C.blue}${`${s.estimatedMessages}`.padStart(5)}${C.reset}  ${C.dim}${formatFileSize(s.fileSize).padStart(6)}${C.reset}  ${C.white}${s.topic.substring(0,40)}${C.reset}`);
+    console.log(`${C.dim}${`${i+1}`.padStart(3)}${C.reset}  ${C.yellow}${formatTimestamp(s.lastTs).padEnd(18)}${C.reset} ${C.magenta}${s.project.substring(0,24).padEnd(25)}${C.reset} ${C.green}${(s.gitBranch||'').substring(0,27).padEnd(28)}${C.reset} ${C.blue}${`${s.estimatedMessages}`.padStart(5)}${C.reset}  ${C.dim}${formatFileSize(s.fileSize).padStart(6)}${C.reset}  ${C.white}${s.topic.substring(0,40)}${C.reset}`);
   });
   console.log(`${C.dim}${'─'.repeat(100)}${C.reset}`);
   console.log(`\n${C.dim}Resume: ${C.cyan}${CLI.name} --resume <session-id>${C.reset}\n`);
@@ -552,10 +482,14 @@ function createApp() {
   function buildListItems() {
     const listW = Math.floor((screen.width || 100) / 2) - 2;
 
+    // Dynamic column widths: project gets wider as window grows
+    const timeW = 18;
+    const projW = listW >= 80 ? Math.min(30, Math.floor((listW - timeW - 16) * 0.4)) : Math.max(14, Math.floor((listW - timeW - 16) * 0.35));
+
     return filteredSessions.map((session) => {
       const color = getProjectColor(session.project, projectColorMap);
-      const proj = `{${color}-fg}${session.project.substring(0, 14).padEnd(14)}{/}`;
-      const time = `{#e0af68-fg}${formatTimestamp(session.lastTs).padEnd(18)}{/}`;
+      const time = `{#e0af68-fg}${formatTimestamp(session.lastTs).padEnd(timeW)}{/}`;
+      const proj = `{${color}-fg}${session.project.substring(0, projW).padEnd(projW)}{/}`;
       const msgs = `{#7aa2f7-fg}${String(session.estimatedMessages).padStart(4)}{/}{#565f89-fg}msg{/}`;
       const size = `{#565f89-fg}${formatFileSize(session.fileSize).padStart(6)}{/}`;
 
@@ -570,9 +504,9 @@ function createApp() {
 
       // Compose a multi-line string for each list item.
       // blessed.list renders each item as a single row, so we pack info densely.
-      // Line: project | time | msgs | size
+      // Line: time | project | msgs | size
       // (topic + branch shown on next visual line via padding trick)
-      let line1 = ` ${proj} ${time} ${msgs} ${size}`;
+      let line1 = ` ${time} ${proj} ${msgs} ${size}`;
       let line2 = `   {#a9b1d6-fg}${esc(topic)}{/}`;
       let line3 = branch ? `   ${branch}  ${dur}` : (dur ? `   ${dur}` : '');
 
@@ -592,20 +526,24 @@ function createApp() {
   function refreshList() {
     const listW = Math.floor((screen.width || 100) / 2) - 2;
 
+    // Dynamic column widths: project gets wider as window grows
+    const timeW = 16;
+    const projW = listW >= 80 ? Math.min(30, Math.floor((listW - timeW - 6) * 0.4)) : Math.max(12, Math.floor((listW - timeW - 6) * 0.35));
+
     const sessionItems = filteredSessions.map((session) => {
       const color = getProjectColor(session.project, projectColorMap);
       const eMode = getEffectivePermissionMode(meta, session);
       const modeIcon = (eMode === 'bypassPermissions') ? '{#f7768e-fg}!{/}' : ' ';
-      const proj = `{${color}-fg}${session.project.substring(0, 12).padEnd(12)}{/}`;
-      const time = `{#e0af68-fg}${formatTimestamp(session.lastTs).padEnd(16)}{/}`;
+      const time = `{#e0af68-fg}${formatTimestamp(session.lastTs).padEnd(timeW)}{/}`;
+      const proj = `{${color}-fg}${session.project.substring(0, projW).padEnd(projW)}{/}`;
 
-      const fixedLen = 1 + 12 + 1 + 16 + 1 + 3;
+      const fixedLen = 1 + timeW + 1 + projW + 1 + 3;
       const topicMaxLen = Math.max(10, listW - fixedLen);
       let topic = session.customTitle || session.topic;
 
       if (topic.length > topicMaxLen) topic = topic.substring(0, topicMaxLen) + '…';
 
-      let label = `${modeIcon}${proj} ${time} `;
+      let label = `${modeIcon}${time} ${proj} `;
       if (session.customTitle) {
         label += `{#73daca-fg}{bold}${esc(topic)}{/}`;
       } else {
@@ -955,7 +893,7 @@ function createApp() {
   });
 
   // ─── Resume Session ─────────────────────────────────────────────────────
-  // Auto-detect: use mai-claude if available, otherwise fall back to claude
+  // Resume a previous session
 
   function resumeSession(session, modeOverride) {
     process.stdout.write('\x1b[0m');
@@ -1389,6 +1327,9 @@ function createApp() {
     filterText = ''; selectedIndex = -1; applyFilter();
   });
   screen.key(['q', 'C-c'], () => { if (renameMode) return; process.stdout.write('\x1b[0m'); screen.destroy(); process.exit(0); });
+
+  // Re-render list on terminal resize so columns adapt to new width
+  screen.on('resize', () => { refreshList(); renderDetail(); screen.render(); });
 
   // Remove blessed's built-in wheel handlers (they call select which changes selection)
   listPanel.removeAllListeners('element wheeldown');

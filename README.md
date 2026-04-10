@@ -78,7 +78,6 @@ claude-starter
 | ✏️ | **重命名会话** | `r` 直接重命名，支持中文输入 |
 | 🗑️ | **删除会话** | `x` 删除不需要的会话 |
 | ⌨️ | **Vim 快捷键** | `j`/`k` 上下，`g`/`G` 跳顶/底 |
-| 🧠 | **智能 CLI** | 自动检测 `mai-claude` / `claude` |
 | 🔐 | **完全本地** | 不联网，不上传，不追踪 |
 
 ## 安装
@@ -186,7 +185,6 @@ Searches across **everything** — project names, Git branches, conversation con
 | ✏️ | **Rename Sessions** | Press `r` to rename, supports CJK input |
 | 🗑️ | **Delete Sessions** | Press `x` to remove unwanted sessions |
 | ⌨️ | **Vim Keybindings** | `j`/`k` navigate, `g`/`G` jump to top/bottom |
-| 🧠 | **Smart CLI** | Auto-detects `mai-claude` vs `claude` |
 | 🔐 | **100% Local** | No network, no telemetry, no data leaves your machine |
 
 ## Install
