@@ -132,17 +132,20 @@ function loadSessionQuick(filePath, projectName) {
   const sessionId = path.basename(filePath, '.jsonl');
   const stat = fs.statSync(filePath);
 
+  // Use 32KB head buffer (up from 8KB) to handle sessions whose first user
+  // message is very large (e.g. pasted KQL queries, code blocks).
+  const HEAD_SIZE = 32768;
   const fd = fs.openSync(filePath, 'r');
-  const headBuf = Buffer.alloc(Math.min(8192, stat.size));
+  const headBuf = Buffer.alloc(Math.min(HEAD_SIZE, stat.size));
   fs.readSync(fd, headBuf, 0, headBuf.length, 0);
 
   // Read tail with progressive expansion: start at 32KB, grow up to 256KB
   // until we find a JSON line with a top-level timestamp (to get accurate lastTs).
   let tailStr = '';
-  if (stat.size > 8192) {
+  if (stat.size > HEAD_SIZE) {
     const tailSizes = [32768, 65536, 131072, 262144];
     for (const ts of tailSizes) {
-      const tailSize = Math.min(ts, stat.size - 8192);
+      const tailSize = Math.min(ts, stat.size - HEAD_SIZE);
       const tailBuf = Buffer.alloc(tailSize);
       fs.readSync(fd, tailBuf, 0, tailSize, stat.size - tailSize);
       tailStr = tailBuf.toString('utf-8');
@@ -151,7 +154,7 @@ function loadSessionQuick(filePath, projectName) {
         try { return !!JSON.parse(line).timestamp; } catch { return false; }
       });
       if (hasTopLevelTs) break;
-      if (tailSize >= stat.size - 8192) break;  // already read entire file
+      if (tailSize >= stat.size - HEAD_SIZE) break;  // already read entire file
     }
   }
   fs.closeSync(fd);
@@ -180,7 +183,42 @@ function loadSessionQuick(filePath, projectName) {
         userMsgCount++;
         if (!firstUserMsg) firstUserMsg = extractUserText(d);
       }
-    } catch (e) { /* partial line */ }
+    } catch (e) {
+      // The line was truncated by the head buffer. Try to salvage metadata
+      // via regex so we don't lose the session entirely.
+      if (!firstTs) {
+        const tsMatch = line.match(/"timestamp"\s*:\s*"([^"]+)"/);
+        if (tsMatch) firstTs = tsMatch[1];
+      }
+      if (!version) {
+        const vMatch = line.match(/"version"\s*:\s*"([^"]+)"/);
+        if (vMatch) version = vMatch[1];
+      }
+      if (!gitBranch) {
+        const bMatch = line.match(/"gitBranch"\s*:\s*"([^"]+)"/);
+        if (bMatch) gitBranch = bMatch[1];
+      }
+      if (!cwd) {
+        const cwdMatch = line.match(/"cwd"\s*:\s*"([^"]+)"/);
+        if (cwdMatch) cwd = cwdMatch[1];
+      }
+      // Try to extract user message text from the truncated JSON line.
+      // User messages have "type":"user" and text content embedded inside.
+      if (!firstUserMsg && /"type"\s*:\s*"user"/.test(line)) {
+        userMsgCount++;
+        // Match the text field inside message.content (handles both string
+        // content and array-of-objects content structures).
+        const textMatch = line.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)/) ||
+                          line.match(/"content"\s*:\s*"((?:[^"\\]|\\.)*)/);
+        if (textMatch) {
+          let text = '';
+          try { text = JSON.parse('"' + textMatch[1] + '"'); } catch { text = textMatch[1]; }
+          if (!text.startsWith('<local-command') && !text.startsWith('<command-')) {
+            firstUserMsg = text.substring(0, 200);
+          }
+        }
+      }
+    }
   }
 
   if (tailStr) {
@@ -189,7 +227,12 @@ function loadSessionQuick(filePath, projectName) {
       try {
         const d = JSON.parse(line);
         if (d.timestamp) lastTs = d.timestamp;
-        if (d.type === 'user') userMsgCount++;
+        if (d.type === 'user') {
+          userMsgCount++;
+          // If no real user message was found in the head (all were commands),
+          // try to pick one from the tail as a fallback topic.
+          if (!firstUserMsg) firstUserMsg = extractUserText(d);
+        }
         if (d.type === 'custom-title' && d.customTitle) customTitle = d.customTitle;
       } catch (e) { /* partial line */ }
     }
