@@ -393,7 +393,9 @@ function formatTimestamp(ts) {
   if (!ts) return 'unknown';
   const d = new Date(ts);
   const now = new Date();
-  const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const targetStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diffDays = Math.round((todayStart.getTime() - targetStart.getTime()) / 86400000);
   const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
   if (diffDays === 0) return `Today ${time}`;
   if (diffDays === 1) return `Yesterday ${time}`;
