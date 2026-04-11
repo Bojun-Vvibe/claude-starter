@@ -11,6 +11,7 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
         node: [18, 20, 22]
@@ -20,7 +21,15 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: npm install
-      - run: npm run test:all
+      - name: Run tests
+        run: |
+          # --test-force-exit is only available in Node 20+
+          NODE_MAJOR=$(node -e "console.log(process.versions.node.split('.')[0])")
+          if [ "$NODE_MAJOR" -ge 20 ]; then
+            node --test --test-force-exit test.js test-tui.js
+          else
+            node --test test.js
+          fi
 
   publish:
     needs: test
@@ -36,7 +45,7 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
       - run: npm install
-      - run: npm run test:all
+      - run: node --test --test-force-exit test.js test-tui.js
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
