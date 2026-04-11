@@ -1508,58 +1508,99 @@ function createApp() {
   listPanel.focus();
 }
 
-// ─── Entry Point ─────────────────────────────────────────────────────────────
+// ─── Exports for Testing ────────────────────────────────────────────────────
+// When required as a module (e.g. by tests), export helpers without launching
+// the CLI / TUI.  The entry-point logic only runs when executed directly.
 
-const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'));
-
-const args = process.argv.slice(2);
-
-if (args.includes('--version') || args.includes('-v') || args.includes('-V')) {
-  console.log(`claude-starter v${PKG.version}`);
-  process.exit(0);
+if (typeof module !== 'undefined') {
+  module.exports = {
+    // Data helpers
+    getProjectDisplayName,
+    extractUserText,
+    loadSessionQuick,
+    loadSessionDetail,
+    loadAllSessions,
+    // Formatting
+    formatTimestamp,
+    formatFileSize,
+    getProjectColor,
+    esc,
+    // Meta
+    loadMeta,
+    saveMeta,
+    getSessionMeta,
+    getEffectivePermissionMode,
+    setSessionPermissionMode,
+    setGlobalPermissionMode,
+    // Constants
+    PERMISSION_MODES,
+    PROJECT_COLORS,
+    CLAUDE_DIR,
+    PROJECTS_DIR,
+    META_FILE,
+    // CLI
+    detectCLI,
+    // List mode (for integration tests)
+    runListMode,
+    // TUI (for interaction tests)
+    createApp,
+  };
 }
 
-if (args.includes('--update') || args.includes('-u')) {
-  const C = {
-    reset: '\x1b[0m', dim: '\x1b[2m', bold: '\x1b[1m',
-    cyan: '\x1b[36m', yellow: '\x1b[33m', green: '\x1b[32m',
-    red: '\x1b[31m',
-  };
-  console.log(`\n${C.cyan}🔄 Checking for updates…${C.reset}\n`);
+// ─── Entry Point ─────────────────────────────────────────────────────────────
+// Only run CLI/TUI when executed directly (not when required as a module).
 
-  try {
-    const latest = execSync('npm view claude-starter version 2>/dev/null', {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 10000,
-    }).toString().trim();
+if (require.main === module) {
+  const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'));
 
-    if (latest === PKG.version) {
-      console.log(`${C.green}✓ Already on the latest version (v${PKG.version})${C.reset}\n`);
-      process.exit(0);
-    }
+  const args = process.argv.slice(2);
 
-    console.log(`${C.yellow}  Current: v${PKG.version}${C.reset}`);
-    console.log(`${C.green}  Latest:  v${latest}${C.reset}\n`);
-    console.log(`${C.cyan}📦 Updating…${C.reset}\n`);
-
-    try {
-      execSync('npm install -g claude-starter@latest', { stdio: 'inherit', timeout: 60000 });
-      console.log(`\n${C.green}${C.bold}✓ Updated to v${latest}${C.reset}\n`);
-    } catch (e) {
-      console.error(`\n${C.red}✗ Update failed. Try manually:${C.reset}`);
-      console.log(`${C.yellow}  npm install -g claude-starter@latest${C.reset}\n`);
-      process.exit(1);
-    }
-  } catch (e) {
-    console.error(`${C.red}✗ Could not check for updates (network error or npm not found)${C.reset}\n`);
-    process.exit(1);
+  if (args.includes('--version') || args.includes('-v') || args.includes('-V')) {
+    console.log(`claude-starter v${PKG.version}`);
+    process.exit(0);
   }
 
-  process.exit(0);
-}
+  if (args.includes('--update') || args.includes('-u')) {
+    const C = {
+      reset: '\x1b[0m', dim: '\x1b[2m', bold: '\x1b[1m',
+      cyan: '\x1b[36m', yellow: '\x1b[33m', green: '\x1b[32m',
+      red: '\x1b[31m',
+    };
+    console.log(`\n${C.cyan}🔄 Checking for updates…${C.reset}\n`);
 
-if (args.includes('--help') || args.includes('-h')) {
-  console.log(`
+    try {
+      const latest = execSync('npm view claude-starter version 2>/dev/null', {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 10000,
+      }).toString().trim();
+
+      if (latest === PKG.version) {
+        console.log(`${C.green}✓ Already on the latest version (v${PKG.version})${C.reset}\n`);
+        process.exit(0);
+      }
+
+      console.log(`${C.yellow}  Current: v${PKG.version}${C.reset}`);
+      console.log(`${C.green}  Latest:  v${latest}${C.reset}\n`);
+      console.log(`${C.cyan}📦 Updating…${C.reset}\n`);
+
+      try {
+        execSync('npm install -g claude-starter@latest', { stdio: 'inherit', timeout: 60000 });
+        console.log(`\n${C.green}${C.bold}✓ Updated to v${latest}${C.reset}\n`);
+      } catch (e) {
+        console.error(`\n${C.red}✗ Update failed. Try manually:${C.reset}`);
+        console.log(`${C.yellow}  npm install -g claude-starter@latest${C.reset}\n`);
+        process.exit(1);
+      }
+    } catch (e) {
+      console.error(`${C.red}✗ Could not check for updates (network error or npm not found)${C.reset}\n`);
+      process.exit(1);
+    }
+
+    process.exit(0);
+  }
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(`
 \x1b[36m🚀 Claude Starter\x1b[0m  \x1b[2mv${PKG.version}\x1b[0m
 
 Usage:
@@ -1585,14 +1626,15 @@ TUI Keyboard Shortcuts:
   Esc           Clear filter
   q / Ctrl-C    Quit
 `);
-  process.exit(0);
-}
+    process.exit(0);
+  }
 
-if (args.includes('--list') || args.includes('-l')) {
-  const limitIdx = args.indexOf('--list') !== -1 ? args.indexOf('--list') : args.indexOf('-l');
-  const limit = parseInt(args[limitIdx + 1]) || 30;
-  runListMode(limit);
-  process.exit(0);
-}
+  if (args.includes('--list') || args.includes('-l')) {
+    const limitIdx = args.indexOf('--list') !== -1 ? args.indexOf('--list') : args.indexOf('-l');
+    const limit = parseInt(args[limitIdx + 1]) || 30;
+    runListMode(limit);
+    process.exit(0);
+  }
 
-createApp();
+  createApp();
+}

@@ -7,7 +7,10 @@
     "claude-starter": "./index.js"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node --test test.js",
+    "test:tui": "node --test --test-force-exit test-tui.js",
+    "test:all": "node --test --test-force-exit test.js test-tui.js"
   },
   "keywords": [
     "claude",
