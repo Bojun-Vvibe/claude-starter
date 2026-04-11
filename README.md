@@ -11,8 +11,8 @@
 <h1 align="center">🚀 Claude Starter</h1>
 
 <p align="center">
-  <strong>Claude Code 的主页。</strong>你的所有会话，一目了然。<br/>
-  <strong>Your homepage for Claude Code.</strong> All your sessions, at a glance.
+  <strong>Your homepage for Claude Code.</strong> All your sessions, at a glance.<br/>
+  <strong>Claude Code 的主页。</strong>你的所有会话，一目了然。
 </p>
 
 <p align="center">
@@ -22,116 +22,6 @@
 <p align="center">
   <img src="./screenshot.svg" alt="Claude Starter Screenshot" width="800" />
 </p>
-
----
-
-# 🇨🇳 中文
-
-## 痛点
-
-用过 Claude Code 的 `/resume` 吗？它给你的是这样一坨东西：
-
-```
-? Select a conversation
-  3ee0f33a-b882-424f-9ba4-260342e4dd5b - 4/3/2026, 10:53:41 AM
-  87570bab-ee92-4681-9591-54abf2fcb486 - 4/3/2026, 10:18:55 AM
-  ...200 个 UUID...
-```
-
-一堆 UUID，没有上下文，无法搜索。**想找到上周帮你调过 bug 的那个 session？祝你好运。**
-
-## 解决方案
-
-**Claude Starter** 是一个精美的终端可视化工具，让你能像浏览网页一样浏览所有 Claude 历史会话。它是你的 **Claude 主页** —— 每次打开终端，`claude-starter` 一敲，所有 session 一目了然。
-
-```bash
-claude-starter
-```
-
-精美的分屏 UI，Tokyo Night 配色。左侧列表一目了然，右侧实时预览对话详情。不是 UUID，是你**真正说过的话**。
-
-## 🔍 搜索 — 杀手级功能
-
-按 `/` 开始输入，**就这么简单**。无需按回车。
-
-跨项目名、Git 分支、对话内容**全文实时搜索**。输入即过滤，`↑↓` 直接导航结果。
-
-- `auth` → 所有认证相关的对话
-- `refactor` → 上周的代码重构
-- `web-app fix` → 某个项目的 bug 修复
-
-**不需要管理模式，不需要确认。输入即搜，方向键即走。**
-
-## 核心能力
-
-| | 功能 | 说明 |
-|---|---|---|
-| 🎨 | **精美 TUI** | Tokyo Night 配色，分屏布局，终端里的 App |
-| ✨ | **一键新建** | 列表顶部直接新建对话 |
-| 🔍 | **即时搜索** | `/` 全文搜索，无需回车 |
-| 📂 | **项目过滤** | `p` 按项目筛选 |
-| ⚡ | **秒级恢复** | 选中 → Enter → 回到对话 |
-| 📋 | **对话预览** | 右侧面板展示完整元数据和对话历史 |
-| 🔀 | **多种排序** | 时间 / 大小 / 消息数 / 项目 |
-| 📎 | **复制 ID** | `c` 一键复制到剪贴板 |
-| 🔒 | **权限模式** | `m` 设置权限模式，`d` 一键 danger 模式恢复 |
-| ✏️ | **重命名会话** | `r` 直接重命名，支持中文输入 |
-| 🗑️ | **删除会话** | `x` 删除不需要的会话 |
-| ⌨️ | **Vim 快捷键** | `j`/`k` 上下，`g`/`G` 跳顶/底 |
-| 🧠 | **智能 CLI** | 自动检测 `mai-claude` / `claude` |
-| 🔐 | **完全本地** | 不联网，不上传，不追踪 |
-
-## 安装
-
-```bash
-npm install -g claude-starter
-```
-
-或者从源码安装：
-
-```bash
-git clone https://github.com/Bojun-Vvibe/claude-starter.git
-cd claude-starter
-npm install
-npm link
-```
-
-然后运行 `claude-starter`，就这么简单。
-
-## CLI 参数
-
-```bash
-claude-starter              # 启动交互式 TUI
-claude-starter --list [N]   # 打印最近 N 个会话（默认 30）
-claude-starter --version    # 显示版本号
-claude-starter --update     # 检查并更新到最新版本
-claude-starter --help       # 显示帮助信息
-```
-
-## 快捷键
-
-| 按键 | 功能 |
-|:---:|------|
-| `↑` `↓` / `j` `k` | 上下导航 |
-| `Enter` | 新建 / 恢复对话 |
-| `n` | 直接新建 |
-| `d` | Danger 模式恢复（bypassPermissions） |
-| `m` | 权限模式选择器 |
-| `r` | 重命名会话 |
-| `/` | 搜索 |
-| `Backspace` | 删除搜索字符，删空自动退出 |
-| `Esc` | 清空搜索 |
-| `p` | 按项目过滤 |
-| `s` | 切换排序（时间/大小/消息数/项目） |
-| `c` | 复制 Session ID |
-| `x` / `Delete` | 删除会话 |
-| `g` / `G` | 跳到顶 / 底 |
-| `Ctrl-D` / `Ctrl-U` | 翻页 |
-| `q` / `Ctrl-C` | 退出 |
-
-## 原理
-
-读取 `~/.claude/projects/` 下的 JSONL 会话文件，解析元数据和对话内容。200 个 session 加载耗时 ~10ms。**所有数据留在本地，不联网。**
 
 ---
 
@@ -253,6 +143,116 @@ Reads the JSONL session files from `~/.claude/projects/`, parses metadata and co
 ## License
 
 MIT
+
+---
+
+# 🇨🇳 中文
+
+## 痛点
+
+用过 Claude Code 的 `/resume` 吗？它给你的是这样一坨东西：
+
+```
+? Select a conversation
+  3ee0f33a-b882-424f-9ba4-260342e4dd5b - 4/3/2026, 10:53:41 AM
+  87570bab-ee92-4681-9591-54abf2fcb486 - 4/3/2026, 10:18:55 AM
+  ...200 个 UUID...
+```
+
+一堆 UUID，没有上下文，无法搜索。**想找到上周帮你调过 bug 的那个 session？祝你好运。**
+
+## 解决方案
+
+**Claude Starter** 是一个精美的终端可视化工具，让你能像浏览网页一样浏览所有 Claude 历史会话。它是你的 **Claude 主页** —— 每次打开终端，`claude-starter` 一敲，所有 session 一目了然。
+
+```bash
+claude-starter
+```
+
+精美的分屏 UI，Tokyo Night 配色。左侧列表一目了然，右侧实时预览对话详情。不是 UUID，是你**真正说过的话**。
+
+## 🔍 搜索 — 杀手级功能
+
+按 `/` 开始输入，**就这么简单**。无需按回车。
+
+跨项目名、Git 分支、对话内容**全文实时搜索**。输入即过滤，`↑↓` 直接导航结果。
+
+- `auth` → 所有认证相关的对话
+- `refactor` → 上周的代码重构
+- `web-app fix` → 某个项目的 bug 修复
+
+**不需要管理模式，不需要确认。输入即搜，方向键即走。**
+
+## 核心能力
+
+| | 功能 | 说明 |
+|---|---|---|
+| 🎨 | **精美 TUI** | Tokyo Night 配色，分屏布局，终端里的 App |
+| ✨ | **一键新建** | 列表顶部直接新建对话 |
+| 🔍 | **即时搜索** | `/` 全文搜索，无需回车 |
+| 📂 | **项目过滤** | `p` 按项目筛选 |
+| ⚡ | **秒级恢复** | 选中 → Enter → 回到对话 |
+| 📋 | **对话预览** | 右侧面板展示完整元数据和对话历史 |
+| 🔀 | **多种排序** | 时间 / 大小 / 消息数 / 项目 |
+| 📎 | **复制 ID** | `c` 一键复制到剪贴板 |
+| 🔒 | **权限模式** | `m` 设置权限模式，`d` 一键 danger 模式恢复 |
+| ✏️ | **重命名会话** | `r` 直接重命名，支持中文输入 |
+| 🗑️ | **删除会话** | `x` 删除不需要的会话 |
+| ⌨️ | **Vim 快捷键** | `j`/`k` 上下，`g`/`G` 跳顶/底 |
+| 🧠 | **智能 CLI** | 自动检测 `mai-claude` / `claude` |
+| 🔐 | **完全本地** | 不联网，不上传，不追踪 |
+
+## 安装
+
+```bash
+npm install -g claude-starter
+```
+
+或者从源码安装：
+
+```bash
+git clone https://github.com/Bojun-Vvibe/claude-starter.git
+cd claude-starter
+npm install
+npm link
+```
+
+然后运行 `claude-starter`，就这么简单。
+
+## CLI 参数
+
+```bash
+claude-starter              # 启动交互式 TUI
+claude-starter --list [N]   # 打印最近 N 个会话（默认 30）
+claude-starter --version    # 显示版本号
+claude-starter --update     # 检查并更新到最新版本
+claude-starter --help       # 显示帮助信息
+```
+
+## 快捷键
+
+| 按键 | 功能 |
+|:---:|------|
+| `↑` `↓` / `j` `k` | 上下导航 |
+| `Enter` | 新建 / 恢复对话 |
+| `n` | 直接新建 |
+| `d` | Danger 模式恢复（bypassPermissions） |
+| `m` | 权限模式选择器 |
+| `r` | 重命名会话 |
+| `/` | 搜索 |
+| `Backspace` | 删除搜索字符，删空自动退出 |
+| `Esc` | 清空搜索 |
+| `p` | 按项目过滤 |
+| `s` | 切换排序（时间/大小/消息数/项目） |
+| `c` | 复制 Session ID |
+| `x` / `Delete` | 删除会话 |
+| `g` / `G` | 跳到顶 / 底 |
+| `Ctrl-D` / `Ctrl-U` | 翻页 |
+| `q` / `Ctrl-C` | 退出 |
+
+## 原理
+
+读取 `~/.claude/projects/` 下的 JSONL 会话文件，解析元数据和对话内容。200 个 session 加载耗时 ~10ms。**所有数据留在本地，不联网。**
 
 ---
 
