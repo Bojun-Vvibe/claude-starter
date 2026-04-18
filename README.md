@@ -16,6 +16,10 @@
 </p>
 
 <p align="center">
+  Built for <strong>AI-native developer workflows</strong>: local-first, searchable, resumable, and fast.
+</p>
+
+<p align="center">
   <code>npm install -g claude-starter</code>&nbsp;&nbsp;→&nbsp;&nbsp;<code>claude-starter</code>
 </p>
 
@@ -30,6 +34,8 @@
 ## The Problem
 
 Claude Code's `/resume` gives you a wall of UUIDs:
+
+If you use Claude Code as part of a real development loop, session history stops being archive data and becomes working context. You need to find old agent work by repo, topic, and intent — not by opaque IDs.
 
 ```
 ? Select a conversation
@@ -47,6 +53,8 @@ claude-starter
 ```
 
 Beautiful split-pane UI with Tokyo Night colors. The left panel shows every session with project, time, and topic. The right panel previews the full conversation. Not UUIDs — your **actual words**.
+
+`claude-starter` is built for developers treating coding agents as part of a daily workflow: keep everything local, cut resume friction, and make past conversations actually reusable.
 
 ## 🔍 Search — The Killer Feature
 
@@ -139,6 +147,11 @@ Reads the JSONL session files from `~/.claude/projects/`, parses metadata and co
 
 - **Node.js** >= 18
 - **Claude Code** ([`claude`](https://docs.anthropic.com/en/docs/claude-code) in PATH)
+
+## Related Projects
+
+- **[codex-starter](https://github.com/Bojun-Vvibe/codex-starter)** — the Codex counterpart with the same local-first workflow philosophy
+- **[Bojun-Vvibe](https://github.com/Bojun-Vvibe)** — more terminal UX and AI-native workflow experiments
 
 ## License
 
