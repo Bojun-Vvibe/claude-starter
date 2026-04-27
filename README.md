@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  Built for <strong>AI-native developer workflows</strong>: local-first, searchable, resumable, and fast.
+  Built for <strong>AI-native developer workflows</strong>: local-first, searchable, resumable, and fast — so the next session starts faster than the last one ended.
 </p>
 
 <p align="center">
