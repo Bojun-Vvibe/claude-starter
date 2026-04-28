@@ -9,6 +9,7 @@
  *   claude-starter            # Launch interactive TUI
  *   claude-starter --list     # Print sessions as a table (no TUI)
  *   claude-starter --list N   # Print the latest N sessions
+ *   claude-starter --exclude "pat"  # Exclude sessions matching regex (repeatable)
  *   claude-starter --version  # Show version
  *   claude-starter --update   # Update to the latest version
  *
@@ -34,6 +35,10 @@ const fs = require('fs');
 const path = require('path');
 const { spawn, execSync } = require('child_process');
 const os = require('os');
+
+let excludePatterns = [];
+
+function setExcludePatterns(patterns) { excludePatterns = patterns; }
 
 // ─── CLI Detection ──────────────────────────────────────────────────────────
 // Detect whether `mai-claude` is available (binary, alias, or function).
@@ -417,6 +422,7 @@ function loadAllSessions() {
         if (session.firstTs
             && session.topic !== '(no user messages)'
             && !/^warmup$/i.test(session.topic.trim())
+            && !excludePatterns.some(re => re.test(session.topic))
         ) sessions.push(session);
       } catch (e) { /* skip */ }
     }
@@ -1532,6 +1538,7 @@ if (typeof module !== 'undefined') {
     getEffectivePermissionMode,
     setSessionPermissionMode,
     setGlobalPermissionMode,
+    setExcludePatterns,
     // Constants
     PERMISSION_MODES,
     PROJECT_COLORS,
@@ -1554,6 +1561,20 @@ if (require.main === module) {
   const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'));
 
   const args = process.argv.slice(2);
+
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--exclude' && args[i + 1]) {
+      try { excludePatterns.push(new RegExp(args[i + 1], 'i')); } catch {}
+      i++;
+    }
+  }
+  if (process.env.CLAUDE_STARTER_EXCLUDE) {
+    for (const p of process.env.CLAUDE_STARTER_EXCLUDE.split(',')) {
+      if (p.trim()) {
+        try { excludePatterns.push(new RegExp(p.trim(), 'i')); } catch {}
+      }
+    }
+  }
 
   if (args.includes('--version') || args.includes('-v') || args.includes('-V')) {
     console.log(`claude-starter v${PKG.version}`);
@@ -1606,9 +1627,13 @@ if (require.main === module) {
 Usage:
   claude-starter              Launch interactive TUI
   claude-starter --list [N]   Print latest N sessions (default: 30)
+  claude-starter --exclude "pat"  Exclude sessions matching regex (repeatable)
   claude-starter --version    Show version
   claude-starter --update     Update to the latest version
   claude-starter --help       Show this help
+
+Environment Variables:
+  CLAUDE_STARTER_EXCLUDE=pat1,pat2   Comma-separated regex patterns to exclude
 
 TUI Keyboard Shortcuts:
   ↑/↓           Navigate sessions
