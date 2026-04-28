@@ -35,6 +35,7 @@ const {
   getEffectivePermissionMode,
   setSessionPermissionMode,
   setGlobalPermissionMode,
+  setExcludePatterns,
   PERMISSION_MODES,
   PROJECT_COLORS,
   CLAUDE_DIR,
@@ -693,6 +694,46 @@ describe('loadAllSessions', () => {
     const sessions = loadAllSessions();
     const empty = sessions.filter(s => s.topic === '(no user messages)');
     assert.equal(empty.length, 0, 'Should not contain empty sessions');
+  });
+});
+
+// =============================================================================
+// 11b. loadAllSessions — Exclude patterns
+// =============================================================================
+describe('loadAllSessions with exclude patterns', () => {
+  afterEach(() => {
+    setExcludePatterns([]);
+  });
+
+  it('excludes sessions matching a single regex pattern', () => {
+    const allSessions = loadAllSessions();
+    setExcludePatterns([/episodic/i]);
+    const filtered = loadAllSessions();
+    const excluded = allSessions.filter(s => /episodic/i.test(s.topic));
+    if (excluded.length > 0) {
+      assert.ok(filtered.length < allSessions.length, 'Should have fewer sessions when excluding');
+      assert.ok(filtered.every(s => !/episodic/i.test(s.topic)), 'No matching sessions should remain');
+    }
+  });
+
+  it('excludes sessions matching multiple patterns', () => {
+    setExcludePatterns([/episodic/i, /summary/i]);
+    const filtered = loadAllSessions();
+    assert.ok(filtered.every(s => !/episodic/i.test(s.topic) && !/summary/i.test(s.topic)));
+  });
+
+  it('returns all sessions when no patterns match', () => {
+    const allSessions = loadAllSessions();
+    setExcludePatterns([/zzz_nonexistent_pattern_zzz/]);
+    const filtered = loadAllSessions();
+    assert.equal(filtered.length, allSessions.length);
+  });
+
+  it('returns all sessions when patterns array is empty', () => {
+    const allSessions = loadAllSessions();
+    setExcludePatterns([]);
+    const filtered = loadAllSessions();
+    assert.equal(filtered.length, allSessions.length);
   });
 });
 
