@@ -50,6 +50,11 @@ writeSession(projAlpha, 'sess-a1', [
   { timestamp: '2026-04-10T11:00:00Z', type: 'assistant', message: { content: [{ type: 'text', text: 'I fixed the login bug' }] } },
   { timestamp: '2026-04-10T11:30:00Z', type: 'user', message: { content: [{ type: 'text', text: 'Now add unit tests' }] } },
   { timestamp: '2026-04-10T12:00:00Z', type: 'assistant', message: { content: [{ type: 'text', text: 'Added 5 unit tests' }] } },
+  ...Array.from({ length: 20 }, (_, index) => ({
+    timestamp: `2026-04-10T12:${String(index + 1).padStart(2, '0')}:00Z`,
+    type: 'user',
+    message: { content: [{ type: 'text', text: `extra prompt ${String(index + 1).padStart(2, '0')}` }] },
+  })),
 ]);
 
 // Session A2 — April 9
@@ -347,6 +352,13 @@ describe('TUI — Initial State', () => {
 
   it('detail panel shows "Start a New Conversation"', () => {
     assert.ok(detailText().includes('New Conversation'), `Detail should show new conversation: ${detailText().substring(0, 100)}`);
+  });
+
+  it('expands the conversation preview for taller detail panes', () => {
+    W.detail.height = 80;
+    fireScreenKey('home');
+    pressDown();
+    assert.match(detailText(), /extra prompt 11/);
   });
 
   it('footer shows all shortcut keys', () => {
