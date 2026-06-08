@@ -200,11 +200,11 @@ describe('formatTimestamp', () => {
 // =============================================================================
 describe('esc', () => {
   it('escapes opening curly braces', () => {
-    assert.equal(esc('hello {world}'), 'hello \\{world}');
+    assert.equal(esc('hello {world}'), 'hello {open}world{close}');
   });
 
   it('handles multiple braces', () => {
-    assert.equal(esc('{a} {b} {c}'), '\\{a} \\{b} \\{c}');
+    assert.equal(esc('{a} {b} {c}'), '{open}a{close} {open}b{close} {open}c{close}');
   });
 
   it('returns unchanged string without braces', () => {
@@ -216,7 +216,7 @@ describe('esc', () => {
   });
 
   it('handles JSON-like content', () => {
-    assert.equal(esc('{"key": "value"}'), '\\{"key": "value"}');
+    assert.equal(esc('{"key": "value"}'), '{open}"key": "value"{close}');
   });
 });
 
