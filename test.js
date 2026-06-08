@@ -199,12 +199,12 @@ describe('formatTimestamp', () => {
 // 4. esc (escape curly braces for blessed tags)
 // =============================================================================
 describe('esc', () => {
-  it('escapes opening curly braces', () => {
-    assert.equal(esc('hello {world}'), 'hello \\{world}');
+  it('escapes curly braces using blessed literals', () => {
+    assert.equal(esc('hello {world}'), 'hello {open}world{close}');
   });
 
   it('handles multiple braces', () => {
-    assert.equal(esc('{a} {b} {c}'), '\\{a} \\{b} \\{c}');
+    assert.equal(esc('{a} {b} {c}'), '{open}a{close} {open}b{close} {open}c{close}');
   });
 
   it('returns unchanged string without braces', () => {
@@ -216,7 +216,11 @@ describe('esc', () => {
   });
 
   it('handles JSON-like content', () => {
-    assert.equal(esc('{"key": "value"}'), '\\{"key": "value"}');
+    assert.equal(esc('{"key": "value"}'), '{open}"key": "value"{close}');
+  });
+
+  it('escapes comma-delimited tag-like content', () => {
+    assert.equal(esc('{config,draft,range}'), '{open}config,draft,range{close}');
   });
 });
 

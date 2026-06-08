@@ -467,7 +467,7 @@ function getProjectColor(projectName, colorMap) {
 }
 
 function esc(text) {
-  return text.replace(/\{/g, '\\{');
+  return text.replace(/[{}]/g, m => m === '{' ? '{open}' : '{close}');
 }
 
 // ─── CLI Mode (--list) ───────────────────────────────────────────────────────
