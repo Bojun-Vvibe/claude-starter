@@ -102,6 +102,8 @@ npm install
 npm link
 ```
 
+To migrate an existing global installation to a fork you maintain yourself, see the [self-hosting guide (中文)](./docs/self-hosting.zh-CN.md).
+
 Then run:
 
 ```bash
@@ -229,6 +231,8 @@ cd claude-starter
 npm install
 npm link
 ```
+
+如果你已经安装了 npm 全局版，希望迁移到自己维护的 fork，请阅读[自托管维护指南](./docs/self-hosting.zh-CN.md)。
 
 然后运行 `claude-starter`，就这么简单。
 
