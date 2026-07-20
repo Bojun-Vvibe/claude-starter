@@ -35,6 +35,7 @@ const {
   getEffectivePermissionMode,
   setSessionPermissionMode,
   setGlobalPermissionMode,
+  updateSessionTitle,
   setExcludePatterns,
   PERMISSION_MODES,
   PROJECT_COLORS,
@@ -447,6 +448,31 @@ describe('Meta operations', () => {
       const meta = { sessions: {}, defaultPermissionMode: 'auto' };
       setGlobalPermissionMode(meta, '');
       assert.equal(meta.defaultPermissionMode, undefined);
+    });
+  });
+
+  describe('updateSessionTitle', () => {
+    it('keeps starter titles local and does not modify the Claude transcript', () => {
+      const transcript = path.join(tmpDir, 'session-1.jsonl');
+      fs.writeFileSync(transcript, '{"type":"user"}\n', 'utf-8');
+      const before = fs.readFileSync(transcript, 'utf-8');
+      const meta = { sessions: {} };
+      const session = { sessionId: 'session-1', filePath: transcript };
+
+      assert.equal(updateSessionTitle(meta, session, '  My Session  '), 'My Session');
+      assert.equal(meta.sessions['session-1'].customTitle, 'My Session');
+      assert.equal(session.customTitle, 'My Session');
+      assert.equal(fs.readFileSync(transcript, 'utf-8'), before);
+    });
+
+    it('clears a local title without touching other session metadata', () => {
+      const meta = { sessions: { 'session-1': { customTitle: 'Old', permissionMode: 'plan' } } };
+      const session = { sessionId: 'session-1', customTitle: 'Old' };
+
+      assert.equal(updateSessionTitle(meta, session, ''), '');
+      assert.equal(meta.sessions['session-1'].customTitle, undefined);
+      assert.equal(meta.sessions['session-1'].permissionMode, 'plan');
+      assert.equal(session.customTitle, '');
     });
   });
 });
@@ -1080,7 +1106,7 @@ describe('Module exports', () => {
       'loadSessionDetail', 'loadAllSessions', 'formatTimestamp',
       'formatFileSize', 'getProjectColor', 'esc', 'loadMeta',
       'saveMeta', 'getSessionMeta', 'getEffectivePermissionMode',
-      'setSessionPermissionMode', 'setGlobalPermissionMode',
+      'setSessionPermissionMode', 'setGlobalPermissionMode', 'updateSessionTitle',
       'detectCLI', 'runListMode',
     ];
     for (const fn of expectedFunctions) {

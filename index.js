@@ -169,6 +169,15 @@ function setGlobalPermissionMode(meta, mode) {
   saveMeta(meta);
 }
 
+function updateSessionTitle(meta, session, newTitle) {
+  const normalizedTitle = (newTitle || '').trim();
+  if (!meta.sessions[session.sessionId]) meta.sessions[session.sessionId] = {};
+  meta.sessions[session.sessionId].customTitle = normalizedTitle || undefined;
+  if (!normalizedTitle) delete meta.sessions[session.sessionId].customTitle;
+  session.customTitle = normalizedTitle;
+  return normalizedTitle;
+}
+
 
 // ─── Data Layer ──────────────────────────────────────────────────────────────
 
@@ -1401,24 +1410,8 @@ function createApp() {
   }
 
   function submitRename(session, newTitle) {
-    newTitle = (newTitle || '').trim();
-
-    // Save to meta
-    if (!meta.sessions[session.sessionId]) meta.sessions[session.sessionId] = {};
-    meta.sessions[session.sessionId].customTitle = newTitle || undefined;
-    if (!newTitle) delete meta.sessions[session.sessionId].customTitle;
+    newTitle = updateSessionTitle(meta, session, newTitle);
     saveMeta(meta);
-
-    // Update in-memory session
-    session.customTitle = newTitle;
-
-    // Also append to JSONL file so Claude Code sees it
-    if (newTitle && fs.existsSync(session.filePath)) {
-      try {
-        const entry = JSON.stringify({ type: 'custom-title', customTitle: newTitle });
-        fs.appendFileSync(session.filePath, '\n' + entry);
-      } catch (e) { /* silently fail */ }
-    }
 
     renderAll();
 
@@ -1540,6 +1533,7 @@ if (typeof module !== 'undefined') {
     getEffectivePermissionMode,
     setSessionPermissionMode,
     setGlobalPermissionMode,
+    updateSessionTitle,
     setExcludePatterns,
     // Constants
     PERMISSION_MODES,
