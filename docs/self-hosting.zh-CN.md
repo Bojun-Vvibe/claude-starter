@@ -4,6 +4,46 @@
 
 这里的“自托管”是指：源码保存在你自己的 fork 和本地 Git 工作区中，全局的 `claude-starter` 命令通过 npm 链接到本地源码。你不需要拥有官方 npm 包的发布权限。
 
+## Cheat Sheet：从全局版切换到 self-host
+
+在本地仓库目录中执行：
+
+```bash
+# 1. 把自己的 main 同步到上游最新版
+git switch main
+git fetch upstream --tags --prune
+git merge --ff-only upstream/main
+git push origin main
+
+# 2. 安装依赖并确认源码可用
+npm ci
+npm run test:all
+
+# 3. 移除之前通过 sudo 安装的官方全局版
+sudo npm uninstall -g claude-starter
+
+# 4. 让全局命令链接到当前源码目录
+npm link
+
+# 5. 验证
+claude-starter --version
+command -v claude-starter
+npm list -g claude-starter --depth=0
+```
+
+以后同步更新只需要：
+
+```bash
+git switch main
+git fetch upstream --tags --prune
+git merge --ff-only upstream/main
+git push origin main
+npm ci
+npm run test:all
+```
+
+全局命令已经链接到源码目录，因此无需再次执行 `npm link`。self-host 模式不要运行 `claude-starter --update`，它会重新安装 npm 上的官方版本并替换本地链接。
+
 ## 先理解三个独立位置
 
 | 操作 | 更新的位置 | 不会更新的位置 |
