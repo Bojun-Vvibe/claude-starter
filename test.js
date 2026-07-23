@@ -46,6 +46,7 @@ const {
   CLAUDE_DIR,
   PROJECTS_DIR,
   META_FILE,
+  switchToAbcInputSource,
 } = mod;
 
 // ─── Test Fixture Helpers ───────────────────────────────────────────────────
@@ -1508,7 +1509,49 @@ describe('package.json', () => {
 });
 
 // =============================================================================
-// 18. detectCLI
+// 18. macOS input source
+// =============================================================================
+describe('switchToAbcInputSource', () => {
+  it('switches macOS input to ABC with macism', () => {
+    const calls = [];
+    const runCommand = (command, args, options) => {
+      calls.push({ command, args, options });
+      return { status: 0 };
+    };
+
+    assert.equal(switchToAbcInputSource('darwin', runCommand), true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].command, 'macism');
+    assert.deepEqual(calls[0].args, ['com.apple.keylayout.ABC']);
+    assert.equal(calls[0].options.timeout, 1000);
+  });
+
+  it('falls back to the built-in macOS input-source API', () => {
+    const calls = [];
+    const runCommand = (command, args) => {
+      calls.push({ command, args });
+      if (command === 'macism') return { status: null, error: { code: 'ENOENT' } };
+      return { status: 0 };
+    };
+
+    assert.equal(switchToAbcInputSource('darwin', runCommand), true);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].command, '/usr/bin/osascript');
+    assert.deepEqual(calls[1].args.slice(0, 3), ['-l', 'JavaScript', '-e']);
+    assert.match(calls[1].args[3], /com\.apple\.keylayout\.ABC/);
+    assert.match(calls[1].args[3], /ObjC\.bindFunction\("TISSelectInputSource"/);
+    assert.match(calls[1].args[3], /sources\.objectAtIndex\(0\)/);
+  });
+
+  it('does not switch input sources outside macOS', () => {
+    let called = false;
+    assert.equal(switchToAbcInputSource('linux', () => { called = true; }), false);
+    assert.equal(called, false);
+  });
+});
+
+// =============================================================================
+// 19. detectCLI
 // =============================================================================
 describe('detectCLI', () => {
   it('returns an object with name and cmd', () => {
@@ -1520,7 +1563,7 @@ describe('detectCLI', () => {
 });
 
 // =============================================================================
-// 19. Module export validation
+// 20. Module export validation
 // =============================================================================
 describe('Module exports', () => {
   it('exports all expected functions', () => {
@@ -1530,7 +1573,7 @@ describe('Module exports', () => {
       'formatFileSize', 'getProjectColor', 'esc', 'loadMeta',
       'saveMeta', 'getSessionMeta', 'getEffectivePermissionMode',
       'setSessionPermissionMode', 'setGlobalPermissionMode', 'updateSessionTitle',
-      'detectCLI', 'runListMode',
+      'detectCLI', 'switchToAbcInputSource', 'runListMode',
     ];
     for (const fn of expectedFunctions) {
       assert.equal(typeof mod[fn], 'function', `${fn} should be a function`);
