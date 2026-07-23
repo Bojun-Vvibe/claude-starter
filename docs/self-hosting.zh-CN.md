@@ -1,259 +1,156 @@
 # Claude Starter 自托管维护指南
 
-本文适合已经通过 npm 安装 `claude-starter`，希望改为从自己的 Git fork 持续维护和运行源码版本的用户。
+## Cheat Sheet
 
-这里的“自托管”是指：源码保存在你自己的 fork 和本地 Git 工作区中，全局的 `claude-starter` 命令通过 npm 链接到本地源码。你不需要拥有官方 npm 包的发布权限。
-
-## Cheat Sheet：从全局版切换到 self-host
-
-在本地仓库目录中执行：
+每次改完代码并准备使用新版本时，在仓库根目录重新运行：
 
 ```bash
-# 1. 把自己的 main 同步到上游最新版
-git switch main
-git fetch upstream --tags --prune
-git merge --ff-only upstream/main
-git push origin main
-
-# 2. 安装依赖并确认源码可用
-npm ci
-npm run test:all
-
-# 3. 移除之前通过 sudo 安装的官方全局版
-sudo npm uninstall -g claude-starter
-
-# 4. 让全局命令链接到当前源码目录
-npm link
-
-# 5. 验证
-claude-starter --version
-command -v claude-starter
-npm list -g claude-starter --depth=0
+npm run test:all && npm install -g . --install-links
 ```
 
-以后同步更新只需要：
+测试通过后，npm 会把当前源码复制为一份固定副本：
+
+- 包目录：`/Users/rejectliu/.local/lib/node_modules/claude-starter`
+- 命令入口：`/Users/rejectliu/.local/bin/claude-starter`
+
+之后继续修改仓库不会影响这份副本；下次要更新日常使用的版本，再运行同一条命令即可。
+
+## 为什么默认使用固定副本
+
+本指南默认使用：
 
 ```bash
-git switch main
-git fetch upstream --tags --prune
-git merge --ff-only upstream/main
-git push origin main
-npm ci
-npm run test:all
+npm install -g . --install-links
 ```
 
-全局命令已经链接到源码目录，因此无需再次执行 `npm link`。self-host 模式不要运行 `claude-starter --update`，它会重新安装 npm 上的官方版本并替换本地链接。
+在当前 npm 中，直接对本地目录执行 `npm install -g .` 可能创建指向工作区的链接；`--install-links` 会先打包再复制，确保全局命令使用稳定快照。
 
-## 先理解三个独立位置
+固定副本有这些特性：
 
-| 操作 | 更新的位置 | 不会更新的位置 |
-|---|---|---|
-| `npm install -g claude-starter` | npm 全局安装目录中的副本 | 本地 Git 仓库 |
-| `git fetch` + `git merge` | 本地 Git 仓库 | npm 全局安装目录中的普通副本 |
-| `npm link` | 让全局命令链接到当前源码目录 | 不会替你同步 Git |
+- 只有测试并重新安装后，修改才会影响日常命令。
+- 切换分支、产生未提交修改时，不会意外改变正在使用的版本。
+- 移动或删除源码目录后，已经安装的命令仍可运行。
+- 每次合并或同步代码后都需要重新安装。
 
-因此，即使 GitHub 上已经发布了新版本，执行 `npm install -g claude-starter` 也不会改变本地仓库里的 `package.json`；反过来，仅同步 Git 仓库也不会更新一个没有链接的全局安装副本。
+## 首次配置或迁移
 
-## 前置条件
+这里的 self-host 是指：源码由自己的 GitHub fork 和本地仓库维护；测试通过后，使用 npm 将当时的源码复制到全局安装目录。需要 Node.js 18 或更高版本、npm 和 Git。
 
-- Node.js 18 或更高版本
-- Git
-- 一个 GitHub fork
-- `origin` 指向你的 fork，`upstream` 指向原作者仓库
-
-在项目目录中确认远端：
-
-```bash
-git remote -v
-```
-
-如果还没有配置 `upstream`：
+远端应当是 `origin` 指向自己的 fork，`upstream` 指向原作者仓库。缺少 `upstream` 时执行：
 
 ```bash
 git remote add upstream https://github.com/Bojun-Vvibe/claude-starter.git
 ```
 
-## 一次性迁移到 self-host
-
-### 1. 同步上游代码
-
-先确保 `main` 没有未提交的修改：
-
-```bash
-git switch main
-git status
-git fetch upstream --tags --prune
-git merge --ff-only upstream/main
-git push origin main
-```
-
-`--ff-only` 会在主分支已经产生分叉时停止，而不是自动制造一个意外的合并提交。
-
-### 2. 安装依赖并运行测试
+首次安装或从 `npm link` 切回固定副本：
 
 ```bash
 npm ci
 npm run test:all
+npm install -g . --install-links
 ```
 
-只有测试通过后再切换全局命令，可以避免把无法启动的工作区直接暴露为日常命令。
+该安装命令会直接替换同名的 npm 全局副本或 npm 链接，不需要预先卸载。如果 `command -v claude-starter` 指向 `~/.bun/bin`，先在仓库根目录执行 `bun unlink`，再运行上面的安装命令。
 
-### 3. 移除原来的全局副本
+## 日常维护
 
-先查看 npm 的全局安装位置：
+### 同步原作者仓库
 
-```bash
-npm config get prefix
-npm list -g claude-starter --depth=0
-```
-
-如果原来没有使用 `sudo` 安装：
-
-```bash
-npm uninstall -g claude-starter
-```
-
-如果原来使用了 `sudo npm install -g claude-starter`，只在这次清理时对应使用：
-
-```bash
-sudo npm uninstall -g claude-starter
-```
-
-清理完成后不要再用 `sudo` 安装 npm 全局包。建议把 npm prefix 配置在当前用户可写的目录中。
-
-### 4. 将全局命令链接到本地源码
-
-在仓库根目录执行：
-
-```bash
-npm link
-```
-
-验证结果：
-
-```bash
-claude-starter --version
-command -v claude-starter
-npm list -g claude-starter --depth=0
-```
-
-`npm list -g` 通常会显示一个指向当前项目目录的链接。此后修改 `index.js` 会直接影响 `claude-starter` 命令，不需要重复全局安装。
-
-如果 zsh 仍缓存旧的命令位置，可以执行：
-
-```bash
-rehash
-```
-
-## 日常维护流程
-
-### 同步原作者的新版本
+自己的 `main` 已包含 fork 独有提交。原作者将来更新后，两条历史会分叉，因此 `git merge --ff-only upstream/main` 会失败。使用普通 merge，并在测试通过后再推送：
 
 ```bash
 git switch main
-git status
+git pull --ff-only origin main
+git status --short
 git fetch upstream --tags --prune
-git merge --ff-only upstream/main
-git push origin main
+git merge upstream/main
+
+# 如有冲突，解决并完成 merge 后再继续
 npm ci
 npm run test:all
+git push origin main
+npm install -g . --install-links
+hash -r
 ```
-
-因为全局命令已经链接到这个工作区，代码同步完成后不需要再次运行 `npm link`。
 
 ### 开发自己的功能
 
-不要直接在 `main` 上开发。为每项改动创建分支：
-
 ```bash
 git switch main
+git pull --ff-only origin main
 git switch -c feat/my-change
 
-# 修改并验证代码
+# 修改并验证
 npm run test:all
-
 git add .
 git commit -m "feat: describe my change"
 git push -u origin feat/my-change
 ```
 
-这样可以继续安全地同步 `upstream/main`，也方便向上游提交 Pull Request。
+通过 PR 合并到自己的 `main` 后，再从 `main` 执行 Cheat Sheet 中的安装流程。
 
-## self-host 模式下不要使用 `--update`
+## 可选：npm link 开发模式
 
-当前的 `claude-starter --update` 会执行：
-
-```bash
-npm install -g claude-starter@latest
-```
-
-这会用 npm 上的官方版本替换本地链接。self-host 模式应使用 Git 同步流程更新，不要运行：
-
-```bash
-claude-starter --update
-```
-
-如果误操作导致链接被替换，回到仓库根目录重新执行：
+如果希望源码修改立即反映到全局命令，可以在仓库根目录执行：
 
 ```bash
 npm ci
 npm link
+hash -r
 ```
 
-## 链接模式和固定副本模式
+验证时，`realpath "$(command -v claude-starter)"` 应指向当前仓库的 `index.js`。链接模式适合短期开发，但切换分支或写入未完成代码也会立即影响命令。
 
-开发维护时推荐 `npm link`：
+开发结束后恢复固定副本：
 
 ```bash
-npm link
+npm run test:all
+npm install -g . --install-links
+hash -r
 ```
 
-它会让源码修改立即生效。如果更希望全局命令使用一份稳定副本，可以改用：
+## 不要使用程序自带的 `--update`
+
+`claude-starter --update` 安装的是 npm registry 中原作者发布的版本：
 
 ```bash
-npm install -g .
-```
-
-固定副本不会跟随工作区修改；每次更新源码并通过测试后，都需要再次执行 `npm install -g .`。
-
-## 恢复使用官方 npm 版本
-
-在仓库根目录取消链接并安装官方最新版：
-
-```bash
-npm unlink -g claude-starter
 npm install -g claude-starter@latest
-rehash
+```
+
+它不会安装自己 fork 中的修改。self-host 模式应通过 Git 更新源码，再运行测试和本地固定副本安装命令。
+
+## GitHub Actions 与 npm 发布
+
+本地 self-host 不需要 npm 包的发布权限。仓库工作流会在 `v*` tag 上尝试发布名为 `claude-starter` 的官方同名包；没有该 npm 包权限时不要创建发布 tag。若以后需要公开发布 fork，应先改为自己拥有的包名或 npm scope，并同步修改更新逻辑。
+
+## 恢复官方 npm 版本
+
+```bash
+npm install -g claude-starter@latest
+hash -r
 claude-starter --version
 ```
-
-这不会删除你的 Git 仓库和个人分支，之后仍然可以重新运行 `npm link` 切回 self-host。
 
 ## 常见问题
 
-### GitHub 已经发布新版本，本地为什么还是旧版本？
+### 为什么修改源码后命令没有变化？
 
-分别检查 Git 源码和全局命令：
-
-```bash
-git describe --tags --always
-node -p "require('./package.json').version"
-claude-starter --version
-npm view claude-starter version
-```
-
-这四项分别表示当前 Git 提交、源码版本、正在执行的全局命令版本和 npm registry 最新版本，它们在没有同步或链接时可以不同。
-
-### `npm link` 报 `EACCES`
-
-通常是之前使用 `sudo npm install -g` 留下了 root 所有权文件。先用对应的 `sudo npm uninstall -g claude-starter` 只清理这个包，再以普通用户运行 `npm link`。不要对整个系统 npm 目录执行递归改权限。
-
-### 移动项目目录后命令无法运行
-
-全局链接仍指向旧路径。进入新目录重新执行：
+这是固定副本模式的预期行为：
 
 ```bash
-npm ci
-npm link
-rehash
+npm run test:all
+npm install -g . --install-links
+hash -r
 ```
+
+### 为什么 `--version` 相同，代码却可能不同？
+
+fork 的提交不一定同步修改 `package.json` 版本号，因此 `--version` 不能证明已安装最新源码。使用：
+
+```bash
+cmp -s index.js "$(realpath "$(command -v claude-starter)")" && echo "source matches"
+```
+
+### npm 全局安装报 `EACCES`
+
+通常是以前通过 `sudo npm install -g` 留下了 root 所有权文件。只清理这个包，并把 npm prefix 配置到当前用户可写目录；不要递归修改整个系统目录的权限。
