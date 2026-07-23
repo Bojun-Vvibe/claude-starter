@@ -87,7 +87,7 @@ The TUI opens immediately and builds the conversation index in the background. W
 | 🗑️ | **Delete Sessions** | Press `x` to remove unwanted sessions |
 | ⌨️ | **Vim Keybindings** | `j`/`k` navigate, `g`/`G` jump to top/bottom |
 | 🧠 | **Smart CLI** | Auto-detects `mai-claude` vs `claude` |
-| ⌨️ | **ABC Input Source** | Automatically switches macOS to ABC when the TUI starts |
+| ⌨️ | **ABC Input Source** | Automatically switches macOS to ABC on startup and focus |
 | 🔐 | **100% Local** | No network, no telemetry, no data leaves your machine |
 
 ## Install

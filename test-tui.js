@@ -195,6 +195,8 @@ function createMockWidget(label, opts) {
 
 // The mock screen
 const mockScreen = createMockWidget('screen', {});
+let screenOptions;
+let inputSourceActivationCount = 0;
 mockScreen.width = 120;
 mockScreen.height = 40;
 mockScreen.style = {};
@@ -209,7 +211,10 @@ mockScreen.on = function(evt, handler) {
 };
 
 const mockBlessed = {
-  screen: () => mockScreen,
+  screen: (opts) => {
+    screenOptions = opts;
+    return mockScreen;
+  },
   box: (opts) => {
     const w = createMockWidget('box', opts);
     // Identify by position
@@ -299,7 +304,9 @@ delete require.cache[indexPath];
 const mod = require('./index.js');
 
 // Call createApp() — this registers all key handlers on mockScreen
-mod.createApp();
+mod.createApp({
+  activateInputSource: () => { inputSourceActivationCount++; },
+});
 const initialHeaderContent = W.header._content;
 
 // Restore globals (tests don't need them mocked anymore)
@@ -395,6 +402,18 @@ before(async () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('TUI — Initial State', () => {
+  it('activates ABC on focus or the first mouse down after blur', () => {
+    assert.equal(screenOptions.sendFocus, true);
+    mockScreen.emit('mousedown', { action: 'mousedown' });
+    assert.equal(inputSourceActivationCount, 0, 'ordinary clicks do not switch input sources');
+
+    mockScreen.emit('blur');
+    mockScreen.emit('mousedown', { action: 'mousedown' });
+    mockScreen.emit('focus');
+    mockScreen.emit('mousedown', { action: 'mousedown' });
+    assert.equal(inputSourceActivationCount, 2);
+  });
+
   it('loads 5 sessions into the list', () => {
     // "New Session" row + 5 sessions = 6 items
     assert.equal(listItems().length, 6, `Expected 6 list items (1 new + 5 sessions), got ${listItems().length}`);

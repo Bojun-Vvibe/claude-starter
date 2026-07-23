@@ -47,6 +47,7 @@ const {
   PROJECTS_DIR,
   META_FILE,
   switchToAbcInputSource,
+  createInputSourceActivator,
 } = mod;
 
 // ─── Test Fixture Helpers ───────────────────────────────────────────────────
@@ -1550,6 +1551,24 @@ describe('switchToAbcInputSource', () => {
   });
 });
 
+describe('createInputSourceActivator', () => {
+  it('debounces repeated input-source activation', () => {
+    let currentTime = 1000;
+    let switchCount = 0;
+    const activate = createInputSourceActivator(
+      () => { switchCount++; return true; },
+      () => currentTime,
+    );
+
+    assert.equal(activate(), true);
+    currentTime = 1100;
+    assert.equal(activate(), false);
+    currentTime = 1250;
+    assert.equal(activate(), true);
+    assert.equal(switchCount, 2);
+  });
+});
+
 // =============================================================================
 // 19. detectCLI
 // =============================================================================
@@ -1573,7 +1592,7 @@ describe('Module exports', () => {
       'formatFileSize', 'getProjectColor', 'esc', 'loadMeta',
       'saveMeta', 'getSessionMeta', 'getEffectivePermissionMode',
       'setSessionPermissionMode', 'setGlobalPermissionMode', 'updateSessionTitle',
-      'detectCLI', 'switchToAbcInputSource', 'runListMode',
+      'detectCLI', 'switchToAbcInputSource', 'createInputSourceActivator', 'runListMode',
     ];
     for (const fn of expectedFunctions) {
       assert.equal(typeof mod[fn], 'function', `${fn} should be a function`);
