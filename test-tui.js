@@ -61,7 +61,11 @@ writeSession(projAlpha, 'sess-a1', [
 writeSession(projAlpha, 'sess-a2', [
   { timestamp: '2026-04-09T08:00:00Z', type: 'system', gitBranch: 'feature/auth', cwd: '/Users/test/Desktop/project-alpha' },
   { timestamp: '2026-04-09T08:05:00Z', type: 'user', message: { content: [{ type: 'text', text: 'Add OAuth support to the API' }] } },
-  { timestamp: '2026-04-09T09:30:00Z', type: 'assistant', message: { content: [{ type: 'text', text: 'OAuth integration complete' }] } },
+  { timestamp: '2026-04-09T09:20:00Z', type: 'assistant', message: { stop_reason: 'tool_use', content: [
+    { type: 'text', text: 'tool-commentary-only-marker' },
+    { type: 'tool_use', name: 'Edit', input: { new_string: 'edit-only-marker' } },
+  ] } },
+  { timestamp: '2026-04-09T09:30:00Z', type: 'assistant', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'OAuth integration complete — release-summary-marker' }] } },
 ]);
 
 // Session B1 — April 8, has custom title + permissionMode
@@ -253,6 +257,7 @@ const mod = require('./index.js');
 
 // Call createApp() — this registers all key handlers on mockScreen
 mod.createApp();
+const initialHeaderContent = W.header._content;
 
 // Restore globals (tests don't need them mocked anymore)
 // Don't restore blessed — keep mock to avoid loading real blessed
@@ -283,6 +288,13 @@ function fireKeypress(ch, keyName, extra) {
 function pressKey(name, ch) {
   fireScreenKey(name);
   fireKeypress(ch || (name.length === 1 ? name : ''), name);
+}
+
+function enterSearch() {
+  // blessed dispatches the generic keypress listener before the keyed `/`
+  // handler. Invoke the semantic action directly so the mock does not append
+  // the activation key to the query in the opposite order.
+  fireScreenKey('/');
 }
 
 function typeChar(ch) {
@@ -321,6 +333,14 @@ function detailText()  { return W.detail ? W.detail._content : ''; }
 function listItems()   { return W.list ? W.list._items : []; }
 function listSelected(){ return W.list ? W.list._selectedIndex : -1; }
 function lastPopup()   { return allPopups[allPopups.length - 1]; }
+
+before(async () => {
+  assert.match(initialHeaderContent, /indexing search/);
+  for (let attempt = 0; attempt < 100 && /indexing search/.test(headerText()); attempt++) {
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.doesNotMatch(headerText(), /indexing search/);
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // 6. TESTS
@@ -460,7 +480,7 @@ describe('TUI — Search Mode (/)', () => {
   });
 
   it('/ enters search mode', () => {
-    pressKey('/');
+    enterSearch();
     assert.ok(headerText().includes('▌'), 'Header should show search cursor');
   });
 
@@ -502,7 +522,7 @@ describe('TUI — Search Mode (/)', () => {
   });
 
   it('search with Enter confirms and exits search mode', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('O');
     typeChar('A');
     typeChar('u');
@@ -527,7 +547,7 @@ describe('TUI — Search Mode (/)', () => {
 
 describe('TUI — Search with navigation', () => {
   it('↓ during search exits search mode but keeps filter', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('l');
     typeChar('o');
     typeChar('g');
@@ -545,6 +565,34 @@ describe('TUI — Search with navigation', () => {
   it('cleanup: clear filter', () => {
     pressEscape();
     assert.equal(listItems().length, 6);
+  });
+});
+
+describe('TUI — Full-text search scope', () => {
+  it('finds final assistant responses', () => {
+    enterSearch();
+    for (const ch of 'release-summary-marker') typeChar(ch);
+    assert.ok(listItems().some(item => item.includes('OAuth')), 'Should find the session by final answer text');
+    pressEscape();
+  });
+
+  it('does not find tool commentary or edit payloads', () => {
+    enterSearch();
+    for (const ch of 'tool-commentary-only-marker') typeChar(ch);
+    assert.equal(listItems().length, 1, 'Only the New Session row should remain');
+    pressEscape();
+
+    enterSearch();
+    for (const ch of 'edit-only-marker') typeChar(ch);
+    assert.equal(listItems().length, 1, 'Edit payloads must not be searchable');
+    pressEscape();
+  });
+
+  it('finds renamed session titles', () => {
+    enterSearch();
+    for (const ch of 'DB Refactor') typeChar(ch);
+    assert.ok(listItems().some(item => item.includes('DB Refactor')));
+    pressEscape();
   });
 });
 
@@ -574,7 +622,7 @@ describe('TUI — Sort (s key)', () => {
   });
 
   it('s is ignored during search mode', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('t');
     pressKey('s', 's');
     // Should still be [time] since s is a search character, not sort
@@ -642,7 +690,7 @@ describe('TUI — Key guards (keys blocked during popups/search/rename)', () => 
   });
 
   it('d is blocked during search mode', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('t');
 
     // d should be a search character, not trigger danger mode
@@ -658,7 +706,7 @@ describe('TUI — Key guards (keys blocked during popups/search/rename)', () => 
   });
 
   it('n is blocked during search mode', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('n');
 
     // 'n' should be added to search text, not trigger new session
@@ -668,7 +716,7 @@ describe('TUI — Key guards (keys blocked during popups/search/rename)', () => 
   });
 
   it('c is blocked during search mode', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('c');
 
     assert.ok(headerText().includes('c'), 'c should be search character');
@@ -677,7 +725,7 @@ describe('TUI — Key guards (keys blocked during popups/search/rename)', () => 
   });
 
   it('s during search mode adds to search text', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('s');
 
     assert.ok(headerText().includes('s'), 's should be search character');
@@ -686,7 +734,7 @@ describe('TUI — Key guards (keys blocked during popups/search/rename)', () => 
   });
 
   it('r is blocked during search mode', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('r');
 
     // r should not open rename popup
@@ -696,7 +744,7 @@ describe('TUI — Key guards (keys blocked during popups/search/rename)', () => 
   });
 
   it('x is blocked during search mode', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('x');
 
     assert.ok(headerText().includes('x'));
@@ -705,7 +753,7 @@ describe('TUI — Key guards (keys blocked during popups/search/rename)', () => 
   });
 
   it('j/k do NOT navigate during search mode (they are search chars)', () => {
-    pressKey('/');
+    enterSearch();
     const selectedBefore = listSelected();
     typeChar('j');
     typeChar('k');
@@ -879,6 +927,15 @@ describe('TUI — p key (project filter)', () => {
     assert.ok(items.length < 6, `Should have fewer items after project filter: ${items.length}`);
   });
 
+  it('combines project filtering with full-text search', () => {
+    enterSearch();
+    for (const ch of 'OAuth') typeChar(ch);
+    assert.ok(listItems().some(item => item.includes('OAuth')));
+
+    pressEscape();
+    assert.match(headerText(), /project-alpha/);
+  });
+
   it('cleanup: reset filter', () => {
     pressEscape();
     assert.equal(listItems().length, 6);
@@ -888,7 +945,7 @@ describe('TUI — p key (project filter)', () => {
 describe('TUI — Escape key behavior', () => {
   it('Escape clears filter and resets to New Session', () => {
     // Apply a search filter first
-    pressKey('/');
+    enterSearch();
     typeChar('R');
     typeChar('e');
     typeChar('a');
@@ -986,7 +1043,7 @@ describe('TUI — Enter key on sessions', () => {
 
   it('Enter on empty filtered list does nothing', () => {
     // Search for something that matches nothing
-    pressKey('/');
+    enterSearch();
     typeChar('z');
     typeChar('z');
     typeChar('z');
@@ -1013,7 +1070,7 @@ describe('TUI — Combined workflow scenarios', () => {
 
   it('search → navigate → clear → navigate works', () => {
     // 1. Search for "database"
-    pressKey('/');
+    enterSearch();
     typeChar('d');
     typeChar('a');
     typeChar('t');
@@ -1046,7 +1103,7 @@ describe('TUI — Combined workflow scenarios', () => {
     assert.ok(headerText().includes('[size]'));
 
     // Search
-    pressKey('/');
+    enterSearch();
     typeChar('a');
     pressEnter();
 

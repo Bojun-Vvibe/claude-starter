@@ -9,8 +9,8 @@
   "scripts": {
     "start": "node index.js",
     "test": "node --test test.js",
-    "test:tui": "node --test --test-force-exit test-tui.js",
-    "test:all": "node --test --test-force-exit test.js test-tui.js",
+    "test:tui": "node --test test-tui.js",
+    "test:all": "node --test test.js test-tui.js",
     "prepublishOnly": "npm run test:all"
   },
   "keywords": [
