@@ -119,19 +119,54 @@ function createMockWidget(label, opts) {
   w._destroyed = false;
   w._scrollPos = 0;
   w.childBase = 0;
+  w.childOffset = 0;
+  w.iheight = 0;
   w.height = 30;
   w.width = 100;
+  w.wrap = opts.wrap !== false;
+  w.parent = opts.parent;
+  w.scrollbar = opts.scrollbar;
+  w.scrollable = opts.scrollable;
   w.items = [];
   w.style = opts.style || {};
 
-  w.setContent = function(c) { this._content = c; };
+  w.setContent = function(c) {
+    this._content = c;
+    this.content = c;
+    if (this.scrollable) {
+      const visibleHeight = this.parent
+        ? this.parent.height - (this.top || 0) - (this.bottom || 0)
+        : this.height;
+      const maxScroll = Math.max(0, this.getScreenLines().length - Math.max(1, visibleHeight));
+      this.childBase = Math.min(this.childBase, maxScroll);
+    }
+  };
   w.getContent = function() { return this._content; };
+  w.parseContent = function() {};
+  w.getScreenLines = function() {
+    if (!this._content) return [''];
+    const width = Math.max(1, this.width - (this.scrollbar ? 1 : 0));
+    return this._content.split('\n').flatMap((line) => {
+      const plain = line.replace(/{(\/?)([\w\-,;!#]*)}/g, '');
+      const rows = this.wrap ? Math.max(1, Math.ceil([...plain].length / width)) : 1;
+      return Array.from({ length: rows }, () => plain);
+    });
+  };
   w.setItems = function(items) { this._items = [...items]; this.items = [...items]; };
   w.select = function(i) { this._selectedIndex = i; };
   w.focus = function() {};
   w.destroy = function() { this._destroyed = true; };
-  w.scroll = function(n) { this._scrollPos += n; };
-  w.setScroll = function(n) { this._scrollPos = n; };
+  w.scroll = function(n) { this.setScroll(this.getScroll() + n); };
+  w.getScroll = function() { return this.childBase + this.childOffset; };
+  w.setScroll = function(n) {
+    const visibleHeight = this.parent
+      ? this.parent.height - (this.top || 0) - (this.bottom || 0)
+      : this.height;
+    const maxScroll = Math.max(0, this.getScreenLines().length - Math.max(1, visibleHeight));
+    this.childBase = Math.max(0, Math.min(n, maxScroll));
+    this.childOffset = 0;
+    this._scrollPos = this.childBase;
+  };
   w.render = function() {};
 
   // Initialize items from opts if provided (e.g. popup lists)
@@ -180,7 +215,15 @@ const mockBlessed = {
     // Identify by position
     if (opts.parent === mockScreen && opts.top === 0 && opts.height === 3) W.header = w;
     if (opts.parent === mockScreen && opts.bottom === 0) W.footer = w;
-    if (opts.parent === mockScreen && opts.top === 4 && opts.left && String(opts.left).includes('50%')) W.detail = w;
+    if (opts.parent === mockScreen && opts.top === 4 && opts.left && String(opts.left).includes('50%')) {
+      W.detail = w;
+      w.width = Math.floor(mockScreen.width / 2) - 1;
+      w.height = mockScreen.height - 7;
+    }
+    if (opts.parent === W.detail && opts.width === '100%') w.width = W.detail.width;
+    if (opts.name === 'detail-meta') W.detailMeta = w;
+    if (opts.name === 'detail-messages') W.detailMessages = w;
+    if (opts.name === 'detail-action') W.detailAction = w;
     return w;
   },
   list: (opts) => {
@@ -329,7 +372,12 @@ function pressUp() {
 
 function headerText()  { return W.header ? W.header._content : ''; }
 function footerText()  { return W.footer ? W.footer._content : ''; }
-function detailText()  { return W.detail ? W.detail._content : ''; }
+function detailText()  {
+  return [W.detailMeta, W.detailMessages, W.detailAction]
+    .filter(Boolean)
+    .map(widget => widget._content)
+    .join('\n');
+}
 function listItems()   { return W.list ? W.list._items : []; }
 function listSelected(){ return W.list ? W.list._selectedIndex : -1; }
 function lastPopup()   { return allPopups[allPopups.length - 1]; }
@@ -374,11 +422,136 @@ describe('TUI — Initial State', () => {
     assert.ok(detailText().includes('New Conversation'), `Detail should show new conversation: ${detailText().substring(0, 100)}`);
   });
 
-  it('expands the conversation preview for taller detail panes', () => {
-    W.detail.height = 80;
+  it('shows every historical message preview regardless of pane height', () => {
     fireScreenKey('home');
     pressDown();
-    assert.match(detailText(), /extra prompt 11/);
+    assert.match(detailText(), /extra prompt 20/);
+  });
+
+  it('keeps a blank line between conversation turns', () => {
+    assert.match(
+      W.detailMessages._content,
+      /I fixed the login bug\{\/\}\n\n .*You >\{\/\} Now add unit tests/,
+    );
+  });
+
+  it('shows at most one Claude preview for each user message', () => {
+    fireScreenKey('home');
+    pressDown();
+    pressDown();
+    assert.equal((W.detailMessages._content.match(/Claude >/g) || []).length, 1);
+    assert.equal((W.detailMessages._content.match(/You >/g) || []).length, 1);
+
+    fireScreenKey('home');
+    pressDown();
+  });
+
+  it('scrolls only the middle conversation panel', () => {
+    const metaScroll = W.detailMeta.getScroll();
+    const messageScroll = W.detailMessages.getScroll();
+    const actionScroll = W.detailAction.getScroll();
+
+    W.detailMeta.emit('wheeldown');
+    W.detailMessages.emit('wheeldown');
+    W.detailAction.emit('wheeldown');
+
+    assert.equal(W.detailMeta.getScroll(), metaScroll);
+    assert.equal(W.detailMessages.getScroll(), messageScroll + 2);
+    assert.equal(W.detailAction.getScroll(), actionScroll);
+    assert.match(W.detailMeta._content, /Session/);
+    assert.match(W.detailAction._content, /Enter.*resume this conversation/);
+  });
+
+  it('preserves message scroll across same-session rerenders', () => {
+    W.detailMessages.childBase = 4;
+    W.detailMessages.childOffset = 0;
+
+    W.list.emit('select item', null, 1);
+
+    assert.equal(W.detailMessages.getScroll(), 4);
+  });
+
+  it('sizes fixed panels from wrapped screen lines', () => {
+    W.detail.width = 39;
+    W.detailMeta.width = 39;
+    W.detailMessages.width = 39;
+    W.detailAction.width = 39;
+    mockScreen.emit('resize');
+
+    assert.ok(W.detailAction.height > 4, 'wrapped resume content should increase fixed height');
+    assert.ok(W.detailMeta.height > W.detailMeta._content.split('\n').length,
+      'wrapped metadata should increase fixed height');
+  });
+
+  it('recomputes the panel split after terminal resize', () => {
+    W.detail.height = 17;
+    mockScreen.emit('resize');
+
+    assert.equal(W.detailMeta.height, 0, 'short panes should use the unified-scroll fallback');
+    assert.equal(W.detailAction.height, 0, 'short panes should use the unified-scroll fallback');
+    assert.match(W.detailMessages._content, /Session/);
+    assert.match(W.detailMessages._content, /Enter.*resume this conversation/);
+
+    W.detail.width = Math.floor(mockScreen.width / 2) - 1;
+    W.detailMeta.width = W.detail.width;
+    W.detailMessages.width = W.detail.width;
+    W.detailAction.width = W.detail.width;
+    W.detail.height = mockScreen.height - 7;
+    mockScreen.emit('resize');
+    assert.ok(W.detailMeta.height > 0, 'tall panes should restore fixed metadata');
+    assert.ok(W.detailAction.height > 0, 'tall panes should restore fixed actions');
+  });
+
+  it('preserves the conversation offset across layout-mode changes', () => {
+    W.detailMessages.childBase = 5;
+    W.detailMessages.childOffset = 0;
+    W.detail.width = 39;
+    W.detailMeta.width = 39;
+    W.detailMessages.width = 39;
+    W.detailAction.width = 39;
+
+    W.detail.height = 17;
+    mockScreen.emit('resize');
+    assert.ok(W.detailMessages.getScroll() > 5,
+      'unified scrolling should offset the viewport past the metadata prefix');
+
+    W.detail.width = Math.floor(mockScreen.width / 2) - 1;
+    W.detailMeta.width = W.detail.width;
+    W.detailMessages.width = W.detail.width;
+    W.detailAction.width = W.detail.width;
+    W.detail.height = mockScreen.height - 7;
+    mockScreen.emit('resize');
+    assert.equal(W.detailMessages.getScroll(), 5);
+  });
+
+  it('clamps conversation scroll after the viewport grows', () => {
+    W.detailMessages.childBase = 999;
+    W.detailMessages.childOffset = 0;
+    W.detail.height = 50;
+    mockScreen.emit('resize');
+
+    const visibleHeight = W.detail.height - W.detailMessages.top - W.detailMessages.bottom;
+    const maxScroll = Math.max(0, W.detailMessages.getScreenLines().length - visibleHeight);
+    assert.ok(W.detailMessages.getScroll() <= maxScroll);
+
+    W.detail.height = mockScreen.height - 7;
+    mockScreen.emit('resize');
+  });
+
+  it('preserves an in-range conversation offset across repeated resize events', () => {
+    W.detailMessages.childBase = 5;
+    W.detailMessages.childOffset = 0;
+    W.detail.height = 34;
+
+    mockScreen.emit('resize');
+    const afterFirstResize = W.detailMessages.getScroll();
+    mockScreen.emit('resize');
+
+    assert.equal(afterFirstResize, 5);
+    assert.equal(W.detailMessages.getScroll(), afterFirstResize);
+
+    W.detail.height = mockScreen.height - 7;
+    mockScreen.emit('resize');
   });
 
   it('footer shows all shortcut keys', () => {

@@ -961,13 +961,38 @@ function createApp() {
   blessed.line({ parent: screen, top: 4, left: '50%', height: '100%-7', orientation: 'vertical', style: { fg: '#414868', bg: '#1a1b26' } });
 
   // ─── Right Panel ───────────────────────────────────────────────────────
+  // The session metadata and resume command stay fixed. Only the conversation
+  // viewport between them is scrollable.
   const detailPanel = blessed.box({
     parent: screen,
     top: 4, left: '50%+1', width: '50%-1', height: '100%-7',
+    style: { bg: '#1a1b26' },
+  });
+
+  const detailMetaPanel = blessed.box({
+    parent: detailPanel,
+    name: 'detail-meta',
+    top: 0, left: 0, width: '100%', height: 1,
+    tags: true,
+    style: { bg: '#1a1b26' },
+  });
+
+  const detailMessagesPanel = blessed.box({
+    parent: detailPanel,
+    name: 'detail-messages',
+    top: 1, left: 0, width: '100%', bottom: 4,
     tags: true, scrollable: true, alwaysScroll: true,
     scrollbar: { ch: '▐', style: { fg: '#565f89' } },
     style: { bg: '#1a1b26' },
     mouse: true,
+  });
+
+  const detailActionPanel = blessed.box({
+    parent: detailPanel,
+    name: 'detail-action',
+    bottom: 0, left: 0, width: '100%', height: 4,
+    tags: true,
+    style: { bg: '#1a1b26' },
   });
 
   blessed.line({ parent: screen, bottom: 2, left: 0, width: '100%', orientation: 'horizontal', style: { fg: '#414868', bg: '#1a1b26' } });
@@ -1080,41 +1105,132 @@ function createApp() {
   }
 
   // ─── Render Detail Panel ───────────────────────────────────────────────
+  let currentMetaContent = '';
+  let currentMessagesContent = '';
+  let currentActionContent = '';
+  let detailUsesUnifiedScroll = false;
+  let unifiedMetaHeight = 0;
+  let currentDetailKey = null;
+
+  function layoutDetailPanels() {
+    detailMetaPanel.parseContent();
+    detailActionPanel.parseContent();
+
+    const requestedMetaHeight = currentMetaContent ? detailMetaPanel.getScreenLines().length : 0;
+    const requestedActionHeight = currentActionContent ? detailActionPanel.getScreenLines().length : 0;
+    const previousMessagesContent = detailMessagesPanel.content;
+    const previousMessageBase = detailMessagesPanel.childBase || 0;
+    const previousMessageOffset = detailMessagesPanel.childOffset || 0;
+    detailMessagesPanel.setContent(currentMetaContent);
+    const requestedUnifiedMetaHeight = currentMetaContent
+      ? detailMessagesPanel.getScreenLines().length
+      : 0;
+    detailMessagesPanel.setContent(previousMessagesContent);
+    detailMessagesPanel.childBase = previousMessageBase;
+    detailMessagesPanel.childOffset = previousMessageOffset;
+    const availableHeight = detailPanel.height || Math.max(1, (screen.height || 24) - 7);
+    const useUnifiedScroll = requestedMetaHeight + requestedActionHeight + 1 > availableHeight;
+    const messagesContent = useUnifiedScroll
+      ? [currentMetaContent, currentMessagesContent, currentActionContent].filter(Boolean).join('\n')
+      : currentMessagesContent;
+
+    const messagesChanged = detailMessagesPanel.content !== messagesContent;
+    let nextMessageBase = previousMessageBase;
+    if (messagesChanged) {
+      detailMessagesPanel.setContent(messagesContent);
+    }
+
+    if (useUnifiedScroll !== detailUsesUnifiedScroll) {
+      nextMessageBase += useUnifiedScroll ? requestedUnifiedMetaHeight : -unifiedMetaHeight;
+    } else if (useUnifiedScroll) {
+      // Unified mode is only a cramped-terminal fallback. Preserve the message
+      // prefix, but accept recoverable viewport shifts instead of tracking
+      // separate metadata/message/action anchors across terminal resizes.
+      nextMessageBase += requestedUnifiedMetaHeight - unifiedMetaHeight;
+    } else if (messagesChanged) {
+      nextMessageBase = 0;
+    }
+
+    detailMessagesPanel.childBase = nextMessageBase;
+    detailMessagesPanel.childOffset = 0;
+    detailUsesUnifiedScroll = useUnifiedScroll;
+    unifiedMetaHeight = useUnifiedScroll ? requestedUnifiedMetaHeight : 0;
+
+    if (useUnifiedScroll) {
+      detailMetaPanel.height = 0;
+      detailMessagesPanel.top = 0;
+      detailMessagesPanel.bottom = 0;
+      detailActionPanel.height = 0;
+    } else {
+      detailMetaPanel.height = requestedMetaHeight;
+      detailMessagesPanel.top = requestedMetaHeight;
+      detailMessagesPanel.bottom = requestedActionHeight;
+      detailActionPanel.height = requestedActionHeight;
+    }
+
+    // childBase is the actual rendered viewport. getScroll()/setScroll() also
+    // include childOffset and are not idempotent when alwaysScroll is enabled.
+    detailMessagesPanel.parseContent();
+    const visibleMessages = useUnifiedScroll
+      ? availableHeight
+      : availableHeight - requestedMetaHeight - requestedActionHeight;
+    const maxMessageBase = Math.max(0, detailMessagesPanel.getScreenLines().length - visibleMessages);
+    detailMessagesPanel.childBase = Math.max(0,
+      Math.min(detailMessagesPanel.childBase || 0, maxMessageBase));
+    detailMessagesPanel.childOffset = 0;
+  }
+
+  function setDetailContent(metaContent, messagesContent, actionContent, detailKey = null) {
+    const detailChanged = detailKey !== currentDetailKey;
+    currentMetaContent = metaContent;
+    currentMessagesContent = messagesContent;
+    currentActionContent = actionContent;
+    detailMetaPanel.setContent(metaContent);
+    detailActionPanel.setContent(actionContent);
+    layoutDetailPanels();
+    if (detailChanged) detailMessagesPanel.setScroll(0);
+    currentDetailKey = detailKey;
+  }
+
+  screen.on('resize', () => {
+    layoutDetailPanels();
+    screen.render();
+  });
+
   function renderDetail(options = {}) {
+    const sep = ` {#414868-fg}${'─'.repeat(44)}{/}`;
+
     if (selectedIndex === -1) {
       const cli = CLI.name;
       const defaultMode = meta.defaultPermissionMode || '';
       const modeFlag = (defaultMode && defaultMode !== 'default') ? ` --permission-mode ${defaultMode}` : '';
-      let c = '';
-      c += `\n {#9ece6a-fg}{bold}Start a New Conversation{/}\n`;
-      c += ` {#414868-fg}${'─'.repeat(44)}{/}\n\n`;
-      c += ` {#a9b1d6-fg}Open a fresh Claude session and start{/}\n`;
-      c += ` {#a9b1d6-fg}coding from scratch.{/}\n\n`;
-      c += ` {#565f89-fg}Working Dir{/}  {#7dcfff-fg}${process.cwd()}{/}\n`;
-      c += ` {#565f89-fg}CLI{/}          {#73daca-fg}${cli}{/}\n`;
+      let metaContent = ` {#9ece6a-fg}{bold}Start a New Conversation{/}\n${sep}\n`;
+      metaContent += ` {#565f89-fg}Working Dir{/}  {#7dcfff-fg}${process.cwd()}{/}\n`;
+      metaContent += ` {#565f89-fg}CLI{/}          {#73daca-fg}${cli}{/}`;
       if (defaultMode && defaultMode !== 'default') {
-        c += ` {#565f89-fg}Mode{/}         {#f7768e-fg}${defaultMode}{/}\n`;
+        metaContent += `\n {#565f89-fg}Mode{/}         {#f7768e-fg}${defaultMode}{/}`;
       }
-      c += ` {#565f89-fg}Command{/}      {#565f89-fg}${cli}${modeFlag}{/}\n\n`;
-      c += ` {#414868-fg}${'─'.repeat(44)}{/}\n`;
-      c += ` {#9ece6a-fg}{bold}↵ Enter{/}{#9ece6a-fg} or {/}{#9ece6a-fg}{bold}n{/}{#9ece6a-fg} to launch{/}\n`;
-      detailPanel.setContent(c);
-      detailPanel.setScroll(0);
+      metaContent += `\n {#565f89-fg}Command{/}      {#565f89-fg}${cli}${modeFlag}{/}`;
+      const messagesContent = '\n {#a9b1d6-fg}Open a fresh Claude session and start{/}'
+        + '\n {#a9b1d6-fg}coding from scratch.{/}';
+      const actionContent = `${sep}\n {#9ece6a-fg}{bold}↵ Enter{/}{#9ece6a-fg} or {/}`
+        + `{#9ece6a-fg}{bold}n{/}{#9ece6a-fg} to launch{/}\n`;
+      setDetailContent(metaContent, messagesContent, actionContent, 'new-session');
       return;
     }
 
     if (filteredSessions.length === 0 || !filteredSessions[selectedIndex]) {
-      detailPanel.setContent('\n  {#565f89-fg}No session selected{/}');
+      setDetailContent('', '\n  {#565f89-fg}No session selected{/}', '');
       return;
     }
 
     const session = filteredSessions[selectedIndex];
     if (options.deferLoad && !session._detailLoaded) {
-      detailPanel.setContent(
+      setDetailContent('',
         `\n {#7dcfff-fg}{bold}${esc(session.customTitle || session.topic)}{/}\n\n`
         + ' {#565f89-fg}Search match indexed. Navigate to load its preview.{/}',
+        '', session.sessionId,
       );
-      detailPanel.setScroll(0);
       return;
     }
     const previousListLabel = session.customTitle || session.topic;
@@ -1125,15 +1241,14 @@ function createApp() {
     if (sm && sm.customTitle) session.customTitle = sm.customTitle;
 
     const color = getProjectColor(session.project, projectColorMap);
-    let c = '';
-    const sep = ` {#414868-fg}${'─'.repeat(44)}{/}`;
+    let metaContent = '';
 
     // Title
-    c += `\n {${color}-fg}{bold}█ ${session.project}{/}\n`;
+    metaContent += ` {${color}-fg}{bold}█ ${session.project}{/}\n`;
     if (session.customTitle) {
-      c += ` {#73daca-fg}{bold}${esc(session.customTitle)}{/}\n`;
+      metaContent += ` {#73daca-fg}{bold}${esc(session.customTitle)}{/}\n`;
     }
-    c += sep + '\n\n';
+    metaContent += sep + '\n\n';
 
     const fields = [
       ['Session', `{#7dcfff-fg}${session.sessionId}{/}`],
@@ -1154,45 +1269,44 @@ function createApp() {
     }
 
     for (const [label, value] of fields) {
-      c += ` {#565f89-fg}${label.padEnd(12)}{/} ${value}\n`;
+      metaContent += ` {#565f89-fg}${label.padEnd(12)}{/} ${value}\n`;
     }
 
     if (session.toolsUsed && session.toolsUsed.length > 0) {
-      c += `\n {#7dcfff-fg}{bold}Tools Used{/}\n`;
+      metaContent += `\n {#7dcfff-fg}{bold}Tools Used{/}\n`;
       const chips = session.toolsUsed.slice(0, 10).map(t => `{#414868-fg}[{/}{#7dcfff-fg}${t}{/}{#414868-fg}]{/}`).join(' ');
-      c += ` ${chips}\n`;
-      if (session.toolsUsed.length > 10) c += ` {#565f89-fg}+${session.toolsUsed.length - 10} more{/}\n`;
+      metaContent += ` ${chips}\n`;
+      if (session.toolsUsed.length > 10) metaContent += ` {#565f89-fg}+${session.toolsUsed.length - 10} more{/}\n`;
     }
 
-    c += `\n {#bb9af7-fg}{bold}Conversation{/}\n`;
-    c += sep + '\n';
+    metaContent += `\n {#bb9af7-fg}{bold}Conversation{/}\n`;
+    metaContent += sep;
 
-    const detailHeight = detailPanel.height || screen.height || 24;
-    const previewLimit = Math.max(10, Math.floor(Math.max(0, detailHeight - 18) / 3));
-    const msgs = (session.userMessages || []).slice(0, previewLimit);
-    const assists = (session.assistantSnippets || []);
-
-    if (msgs.length === 0) {
-      c += `\n  {#565f89-fg}(no readable messages){/}\n`;
+    let messagesContent = '';
+    const messages = session.userMessages || [];
+    const assists = session.assistantSnippets || [];
+    if (messages.length === 0) {
+      messagesContent = `\n  {#565f89-fg}(no readable messages){/}`;
     } else {
-      msgs.forEach((msg, i) => {
-        const clean = esc(msg.replace(/\n/g, ' ').trim());
+      messages.forEach((message, index) => {
+        const clean = esc(message.replace(/\n/g, ' ').trim());
         const trunc = clean.length > 80 ? clean.substring(0, 80) + '…' : clean;
-        c += `\n {#7aa2f7-fg}{bold}You >{/} ${trunc}\n`;
-        if (assists[i]) {
-          const aClean = esc(assists[i].replace(/\n/g, ' ').trim());
-          const aTrunc = aClean.length > 80 ? aClean.substring(0, 80) + '…' : aClean;
-          c += ` {#9ece6a-fg}Claude >{/} {#565f89-fg}${aTrunc}{/}\n`;
+        messagesContent += `${messagesContent ? '\n' : ''}\n {#7aa2f7-fg}{bold}You >{/} ${trunc}`;
+        if (assists[index]) {
+          const assistantClean = esc(assists[index].replace(/\n/g, ' ').trim());
+          const assistantTrunc = assistantClean.length > 80
+            ? assistantClean.substring(0, 80) + '…'
+            : assistantClean;
+          messagesContent += `\n {#9ece6a-fg}Claude >{/} {#565f89-fg}${assistantTrunc}{/}`;
         }
       });
     }
 
-    c += `\n${sep}`;
-    c += `\n {#9ece6a-fg}{bold}↵ Enter{/}{#9ece6a-fg} to resume this conversation{/}`;
-    c += `\n {#565f89-fg}${CLI.name} --resume ${session.sessionId}{/}\n`;
+    const actionContent = `${sep}`
+      + `\n {#9ece6a-fg}{bold}↵ Enter{/}{#9ece6a-fg} to resume this conversation{/}`
+      + `\n {#565f89-fg}${CLI.name} --resume ${session.sessionId}{/}\n`;
 
-    detailPanel.setContent(c);
-    detailPanel.setScroll(0);
+    setDetailContent(metaContent, messagesContent, actionContent, session.sessionId);
     if ((session.customTitle || session.topic) !== previousListLabel) refreshList();
   }
 
@@ -1955,9 +2069,12 @@ function createApp() {
     }
   });
 
-  // Mouse wheel on detail
-  detailPanel.on('wheeldown', () => { detailPanel.scroll(2); screen.render(); });
-  detailPanel.on('wheelup', () => { detailPanel.scroll(-2); screen.render(); });
+  // Mouse wheel only scrolls the conversation viewport. Metadata and the
+  // resume command are separate, fixed panels.
+  detailMessagesPanel.removeAllListeners('wheeldown');
+  detailMessagesPanel.removeAllListeners('wheelup');
+  detailMessagesPanel.on('wheeldown', () => { detailMessagesPanel.scroll(2); screen.render(); });
+  detailMessagesPanel.on('wheelup', () => { detailMessagesPanel.scroll(-2); screen.render(); });
 
   // ─── Go! ───────────────────────────────────────────────────────────────
   renderAll();
