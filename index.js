@@ -915,7 +915,10 @@ function runListMode(limit) {
 
 // ─── TUI Application ────────────────────────────────────────────────────────
 
-function createApp({ activateInputSource = createInputSourceActivator() } = {}) {
+function createApp({
+  activateInputSource = createInputSourceActivator(),
+  onSearchIndexComplete = () => {},
+} = {}) {
   // Let the existing background index resolve ambiguous large transcripts so
   // the TUI can render before any full-file fallback scan.
   const allSessions = loadAllSessions({ deferTopicScan: true });
@@ -2172,6 +2175,7 @@ function createApp({ activateInputSource = createInputSourceActivator() } = {}) 
         updateHeader();
         screen.render();
       }
+      onSearchIndexComplete();
     },
   });
   cancelSearchIndexing = () => {

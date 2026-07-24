@@ -304,8 +304,11 @@ delete require.cache[indexPath];
 const mod = require('./index.js');
 
 // Call createApp() — this registers all key handlers on mockScreen
+let resolveSearchIndexComplete;
+const searchIndexComplete = new Promise(resolve => { resolveSearchIndexComplete = resolve; });
 mod.createApp({
   activateInputSource: () => { inputSourceActivationCount++; },
+  onSearchIndexComplete: resolveSearchIndexComplete,
 });
 const initialHeaderContent = W.header._content;
 
@@ -391,9 +394,7 @@ function lastPopup()   { return allPopups[allPopups.length - 1]; }
 
 before(async () => {
   assert.match(initialHeaderContent, /indexing search/);
-  for (let attempt = 0; attempt < 100 && /indexing search/.test(headerText()); attempt++) {
-    await new Promise(resolve => setImmediate(resolve));
-  }
+  await searchIndexComplete;
   assert.doesNotMatch(headerText(), /indexing search/);
 });
 
