@@ -61,7 +61,11 @@ writeSession(projAlpha, 'sess-a1', [
 writeSession(projAlpha, 'sess-a2', [
   { timestamp: '2026-04-09T08:00:00Z', type: 'system', gitBranch: 'feature/auth', cwd: '/Users/test/Desktop/project-alpha' },
   { timestamp: '2026-04-09T08:05:00Z', type: 'user', message: { content: [{ type: 'text', text: 'Add OAuth support to the API' }] } },
-  { timestamp: '2026-04-09T09:30:00Z', type: 'assistant', message: { content: [{ type: 'text', text: 'OAuth integration complete' }] } },
+  { timestamp: '2026-04-09T09:20:00Z', type: 'assistant', message: { stop_reason: 'tool_use', content: [
+    { type: 'text', text: 'tool-commentary-only-marker' },
+    { type: 'tool_use', name: 'Edit', input: { new_string: 'edit-only-marker' } },
+  ] } },
+  { timestamp: '2026-04-09T09:30:00Z', type: 'assistant', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'OAuth integration complete — release-summary-marker' }] } },
 ]);
 
 // Session B1 — April 8, has custom title + permissionMode
@@ -115,19 +119,54 @@ function createMockWidget(label, opts) {
   w._destroyed = false;
   w._scrollPos = 0;
   w.childBase = 0;
+  w.childOffset = 0;
+  w.iheight = 0;
   w.height = 30;
   w.width = 100;
+  w.wrap = opts.wrap !== false;
+  w.parent = opts.parent;
+  w.scrollbar = opts.scrollbar;
+  w.scrollable = opts.scrollable;
   w.items = [];
   w.style = opts.style || {};
 
-  w.setContent = function(c) { this._content = c; };
+  w.setContent = function(c) {
+    this._content = c;
+    this.content = c;
+    if (this.scrollable) {
+      const visibleHeight = this.parent
+        ? this.parent.height - (this.top || 0) - (this.bottom || 0)
+        : this.height;
+      const maxScroll = Math.max(0, this.getScreenLines().length - Math.max(1, visibleHeight));
+      this.childBase = Math.min(this.childBase, maxScroll);
+    }
+  };
   w.getContent = function() { return this._content; };
+  w.parseContent = function() {};
+  w.getScreenLines = function() {
+    if (!this._content) return [''];
+    const width = Math.max(1, this.width - (this.scrollbar ? 1 : 0));
+    return this._content.split('\n').flatMap((line) => {
+      const plain = line.replace(/{(\/?)([\w\-,;!#]*)}/g, '');
+      const rows = this.wrap ? Math.max(1, Math.ceil([...plain].length / width)) : 1;
+      return Array.from({ length: rows }, () => plain);
+    });
+  };
   w.setItems = function(items) { this._items = [...items]; this.items = [...items]; };
   w.select = function(i) { this._selectedIndex = i; };
   w.focus = function() {};
   w.destroy = function() { this._destroyed = true; };
-  w.scroll = function(n) { this._scrollPos += n; };
-  w.setScroll = function(n) { this._scrollPos = n; };
+  w.scroll = function(n) { this.setScroll(this.getScroll() + n); };
+  w.getScroll = function() { return this.childBase + this.childOffset; };
+  w.setScroll = function(n) {
+    const visibleHeight = this.parent
+      ? this.parent.height - (this.top || 0) - (this.bottom || 0)
+      : this.height;
+    const maxScroll = Math.max(0, this.getScreenLines().length - Math.max(1, visibleHeight));
+    this.childBase = Math.max(0, Math.min(n, maxScroll));
+    this.childOffset = 0;
+    this._scrollPos = this.childBase;
+  };
   w.render = function() {};
 
   // Initialize items from opts if provided (e.g. popup lists)
@@ -156,6 +195,8 @@ function createMockWidget(label, opts) {
 
 // The mock screen
 const mockScreen = createMockWidget('screen', {});
+let screenOptions;
+let inputSourceActivationCount = 0;
 mockScreen.width = 120;
 mockScreen.height = 40;
 mockScreen.style = {};
@@ -170,13 +211,24 @@ mockScreen.on = function(evt, handler) {
 };
 
 const mockBlessed = {
-  screen: () => mockScreen,
+  screen: (opts) => {
+    screenOptions = opts;
+    return mockScreen;
+  },
   box: (opts) => {
     const w = createMockWidget('box', opts);
     // Identify by position
     if (opts.parent === mockScreen && opts.top === 0 && opts.height === 3) W.header = w;
     if (opts.parent === mockScreen && opts.bottom === 0) W.footer = w;
-    if (opts.parent === mockScreen && opts.top === 4 && opts.left && String(opts.left).includes('50%')) W.detail = w;
+    if (opts.parent === mockScreen && opts.top === 4 && opts.left && String(opts.left).includes('50%')) {
+      W.detail = w;
+      w.width = Math.floor(mockScreen.width / 2) - 1;
+      w.height = mockScreen.height - 7;
+    }
+    if (opts.parent === W.detail && opts.width === '100%') w.width = W.detail.width;
+    if (opts.name === 'detail-meta') W.detailMeta = w;
+    if (opts.name === 'detail-messages') W.detailMessages = w;
+    if (opts.name === 'detail-action') W.detailAction = w;
     return w;
   },
   list: (opts) => {
@@ -252,7 +304,13 @@ delete require.cache[indexPath];
 const mod = require('./index.js');
 
 // Call createApp() — this registers all key handlers on mockScreen
-mod.createApp();
+let resolveSearchIndexComplete;
+const searchIndexComplete = new Promise(resolve => { resolveSearchIndexComplete = resolve; });
+mod.createApp({
+  activateInputSource: () => { inputSourceActivationCount++; },
+  onSearchIndexComplete: resolveSearchIndexComplete,
+});
+const initialHeaderContent = W.header._content;
 
 // Restore globals (tests don't need them mocked anymore)
 // Don't restore blessed — keep mock to avoid loading real blessed
@@ -283,6 +341,13 @@ function fireKeypress(ch, keyName, extra) {
 function pressKey(name, ch) {
   fireScreenKey(name);
   fireKeypress(ch || (name.length === 1 ? name : ''), name);
+}
+
+function enterSearch() {
+  // blessed dispatches the generic keypress listener before the keyed `/`
+  // handler. Invoke the semantic action directly so the mock does not append
+  // the activation key to the query in the opposite order.
+  fireScreenKey('/');
 }
 
 function typeChar(ch) {
@@ -317,16 +382,39 @@ function pressUp() {
 
 function headerText()  { return W.header ? W.header._content : ''; }
 function footerText()  { return W.footer ? W.footer._content : ''; }
-function detailText()  { return W.detail ? W.detail._content : ''; }
+function detailText()  {
+  return [W.detailMeta, W.detailMessages, W.detailAction]
+    .filter(Boolean)
+    .map(widget => widget._content)
+    .join('\n');
+}
 function listItems()   { return W.list ? W.list._items : []; }
 function listSelected(){ return W.list ? W.list._selectedIndex : -1; }
 function lastPopup()   { return allPopups[allPopups.length - 1]; }
+
+before(async () => {
+  assert.match(initialHeaderContent, /indexing search/);
+  await searchIndexComplete;
+  assert.doesNotMatch(headerText(), /indexing search/);
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // 6. TESTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('TUI — Initial State', () => {
+  it('activates ABC on focus or the first mouse down after blur', () => {
+    assert.equal(screenOptions.sendFocus, true);
+    mockScreen.emit('mousedown', { action: 'mousedown' });
+    assert.equal(inputSourceActivationCount, 0, 'ordinary clicks do not switch input sources');
+
+    mockScreen.emit('blur');
+    mockScreen.emit('mousedown', { action: 'mousedown' });
+    mockScreen.emit('focus');
+    mockScreen.emit('mousedown', { action: 'mousedown' });
+    assert.equal(inputSourceActivationCount, 2);
+  });
+
   it('loads 5 sessions into the list', () => {
     // "New Session" row + 5 sessions = 6 items
     assert.equal(listItems().length, 6, `Expected 6 list items (1 new + 5 sessions), got ${listItems().length}`);
@@ -354,11 +442,136 @@ describe('TUI — Initial State', () => {
     assert.ok(detailText().includes('New Conversation'), `Detail should show new conversation: ${detailText().substring(0, 100)}`);
   });
 
-  it('expands the conversation preview for taller detail panes', () => {
-    W.detail.height = 80;
+  it('shows every historical message preview regardless of pane height', () => {
     fireScreenKey('home');
     pressDown();
-    assert.match(detailText(), /extra prompt 11/);
+    assert.match(detailText(), /extra prompt 20/);
+  });
+
+  it('keeps a blank line between conversation turns', () => {
+    assert.match(
+      W.detailMessages._content,
+      /I fixed the login bug\{\/\}\n\n .*You >\{\/\} Now add unit tests/,
+    );
+  });
+
+  it('shows at most one Claude preview for each user message', () => {
+    fireScreenKey('home');
+    pressDown();
+    pressDown();
+    assert.equal((W.detailMessages._content.match(/Claude >/g) || []).length, 1);
+    assert.equal((W.detailMessages._content.match(/You >/g) || []).length, 1);
+
+    fireScreenKey('home');
+    pressDown();
+  });
+
+  it('scrolls only the middle conversation panel', () => {
+    const metaScroll = W.detailMeta.getScroll();
+    const messageScroll = W.detailMessages.getScroll();
+    const actionScroll = W.detailAction.getScroll();
+
+    W.detailMeta.emit('wheeldown');
+    W.detailMessages.emit('wheeldown');
+    W.detailAction.emit('wheeldown');
+
+    assert.equal(W.detailMeta.getScroll(), metaScroll);
+    assert.equal(W.detailMessages.getScroll(), messageScroll + 2);
+    assert.equal(W.detailAction.getScroll(), actionScroll);
+    assert.match(W.detailMeta._content, /Session/);
+    assert.match(W.detailAction._content, /Enter.*resume this conversation/);
+  });
+
+  it('preserves message scroll across same-session rerenders', () => {
+    W.detailMessages.childBase = 4;
+    W.detailMessages.childOffset = 0;
+
+    W.list.emit('select item', null, 1);
+
+    assert.equal(W.detailMessages.getScroll(), 4);
+  });
+
+  it('sizes fixed panels from wrapped screen lines', () => {
+    W.detail.width = 39;
+    W.detailMeta.width = 39;
+    W.detailMessages.width = 39;
+    W.detailAction.width = 39;
+    mockScreen.emit('resize');
+
+    assert.ok(W.detailAction.height > 4, 'wrapped resume content should increase fixed height');
+    assert.ok(W.detailMeta.height > W.detailMeta._content.split('\n').length,
+      'wrapped metadata should increase fixed height');
+  });
+
+  it('recomputes the panel split after terminal resize', () => {
+    W.detail.height = 17;
+    mockScreen.emit('resize');
+
+    assert.equal(W.detailMeta.height, 0, 'short panes should use the unified-scroll fallback');
+    assert.equal(W.detailAction.height, 0, 'short panes should use the unified-scroll fallback');
+    assert.match(W.detailMessages._content, /Session/);
+    assert.match(W.detailMessages._content, /Enter.*resume this conversation/);
+
+    W.detail.width = Math.floor(mockScreen.width / 2) - 1;
+    W.detailMeta.width = W.detail.width;
+    W.detailMessages.width = W.detail.width;
+    W.detailAction.width = W.detail.width;
+    W.detail.height = mockScreen.height - 7;
+    mockScreen.emit('resize');
+    assert.ok(W.detailMeta.height > 0, 'tall panes should restore fixed metadata');
+    assert.ok(W.detailAction.height > 0, 'tall panes should restore fixed actions');
+  });
+
+  it('preserves the conversation offset across layout-mode changes', () => {
+    W.detailMessages.childBase = 5;
+    W.detailMessages.childOffset = 0;
+    W.detail.width = 39;
+    W.detailMeta.width = 39;
+    W.detailMessages.width = 39;
+    W.detailAction.width = 39;
+
+    W.detail.height = 17;
+    mockScreen.emit('resize');
+    assert.ok(W.detailMessages.getScroll() > 5,
+      'unified scrolling should offset the viewport past the metadata prefix');
+
+    W.detail.width = Math.floor(mockScreen.width / 2) - 1;
+    W.detailMeta.width = W.detail.width;
+    W.detailMessages.width = W.detail.width;
+    W.detailAction.width = W.detail.width;
+    W.detail.height = mockScreen.height - 7;
+    mockScreen.emit('resize');
+    assert.equal(W.detailMessages.getScroll(), 5);
+  });
+
+  it('clamps conversation scroll after the viewport grows', () => {
+    W.detailMessages.childBase = 999;
+    W.detailMessages.childOffset = 0;
+    W.detail.height = 50;
+    mockScreen.emit('resize');
+
+    const visibleHeight = W.detail.height - W.detailMessages.top - W.detailMessages.bottom;
+    const maxScroll = Math.max(0, W.detailMessages.getScreenLines().length - visibleHeight);
+    assert.ok(W.detailMessages.getScroll() <= maxScroll);
+
+    W.detail.height = mockScreen.height - 7;
+    mockScreen.emit('resize');
+  });
+
+  it('preserves an in-range conversation offset across repeated resize events', () => {
+    W.detailMessages.childBase = 5;
+    W.detailMessages.childOffset = 0;
+    W.detail.height = 34;
+
+    mockScreen.emit('resize');
+    const afterFirstResize = W.detailMessages.getScroll();
+    mockScreen.emit('resize');
+
+    assert.equal(afterFirstResize, 5);
+    assert.equal(W.detailMessages.getScroll(), afterFirstResize);
+
+    W.detail.height = mockScreen.height - 7;
+    mockScreen.emit('resize');
   });
 
   it('footer shows all shortcut keys', () => {
@@ -460,7 +673,7 @@ describe('TUI — Search Mode (/)', () => {
   });
 
   it('/ enters search mode', () => {
-    pressKey('/');
+    enterSearch();
     assert.ok(headerText().includes('▌'), 'Header should show search cursor');
   });
 
@@ -502,7 +715,7 @@ describe('TUI — Search Mode (/)', () => {
   });
 
   it('search with Enter confirms and exits search mode', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('O');
     typeChar('A');
     typeChar('u');
@@ -527,7 +740,7 @@ describe('TUI — Search Mode (/)', () => {
 
 describe('TUI — Search with navigation', () => {
   it('↓ during search exits search mode but keeps filter', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('l');
     typeChar('o');
     typeChar('g');
@@ -545,6 +758,34 @@ describe('TUI — Search with navigation', () => {
   it('cleanup: clear filter', () => {
     pressEscape();
     assert.equal(listItems().length, 6);
+  });
+});
+
+describe('TUI — Full-text search scope', () => {
+  it('finds final assistant responses', () => {
+    enterSearch();
+    for (const ch of 'release-summary-marker') typeChar(ch);
+    assert.ok(listItems().some(item => item.includes('OAuth')), 'Should find the session by final answer text');
+    pressEscape();
+  });
+
+  it('does not find tool commentary or edit payloads', () => {
+    enterSearch();
+    for (const ch of 'tool-commentary-only-marker') typeChar(ch);
+    assert.equal(listItems().length, 1, 'Only the New Session row should remain');
+    pressEscape();
+
+    enterSearch();
+    for (const ch of 'edit-only-marker') typeChar(ch);
+    assert.equal(listItems().length, 1, 'Edit payloads must not be searchable');
+    pressEscape();
+  });
+
+  it('finds renamed session titles', () => {
+    enterSearch();
+    for (const ch of 'DB Refactor') typeChar(ch);
+    assert.ok(listItems().some(item => item.includes('DB Refactor')));
+    pressEscape();
   });
 });
 
@@ -574,7 +815,7 @@ describe('TUI — Sort (s key)', () => {
   });
 
   it('s is ignored during search mode', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('t');
     pressKey('s', 's');
     // Should still be [time] since s is a search character, not sort
@@ -642,7 +883,7 @@ describe('TUI — Key guards (keys blocked during popups/search/rename)', () => 
   });
 
   it('d is blocked during search mode', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('t');
 
     // d should be a search character, not trigger danger mode
@@ -658,7 +899,7 @@ describe('TUI — Key guards (keys blocked during popups/search/rename)', () => 
   });
 
   it('n is blocked during search mode', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('n');
 
     // 'n' should be added to search text, not trigger new session
@@ -668,7 +909,7 @@ describe('TUI — Key guards (keys blocked during popups/search/rename)', () => 
   });
 
   it('c is blocked during search mode', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('c');
 
     assert.ok(headerText().includes('c'), 'c should be search character');
@@ -677,7 +918,7 @@ describe('TUI — Key guards (keys blocked during popups/search/rename)', () => 
   });
 
   it('s during search mode adds to search text', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('s');
 
     assert.ok(headerText().includes('s'), 's should be search character');
@@ -686,7 +927,7 @@ describe('TUI — Key guards (keys blocked during popups/search/rename)', () => 
   });
 
   it('r is blocked during search mode', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('r');
 
     // r should not open rename popup
@@ -696,7 +937,7 @@ describe('TUI — Key guards (keys blocked during popups/search/rename)', () => 
   });
 
   it('x is blocked during search mode', () => {
-    pressKey('/');
+    enterSearch();
     typeChar('x');
 
     assert.ok(headerText().includes('x'));
@@ -705,7 +946,7 @@ describe('TUI — Key guards (keys blocked during popups/search/rename)', () => 
   });
 
   it('j/k do NOT navigate during search mode (they are search chars)', () => {
-    pressKey('/');
+    enterSearch();
     const selectedBefore = listSelected();
     typeChar('j');
     typeChar('k');
@@ -879,6 +1120,15 @@ describe('TUI — p key (project filter)', () => {
     assert.ok(items.length < 6, `Should have fewer items after project filter: ${items.length}`);
   });
 
+  it('combines project filtering with full-text search', () => {
+    enterSearch();
+    for (const ch of 'OAuth') typeChar(ch);
+    assert.ok(listItems().some(item => item.includes('OAuth')));
+
+    pressEscape();
+    assert.match(headerText(), /project-alpha/);
+  });
+
   it('cleanup: reset filter', () => {
     pressEscape();
     assert.equal(listItems().length, 6);
@@ -888,7 +1138,7 @@ describe('TUI — p key (project filter)', () => {
 describe('TUI — Escape key behavior', () => {
   it('Escape clears filter and resets to New Session', () => {
     // Apply a search filter first
-    pressKey('/');
+    enterSearch();
     typeChar('R');
     typeChar('e');
     typeChar('a');
@@ -986,7 +1236,7 @@ describe('TUI — Enter key on sessions', () => {
 
   it('Enter on empty filtered list does nothing', () => {
     // Search for something that matches nothing
-    pressKey('/');
+    enterSearch();
     typeChar('z');
     typeChar('z');
     typeChar('z');
@@ -1013,7 +1263,7 @@ describe('TUI — Combined workflow scenarios', () => {
 
   it('search → navigate → clear → navigate works', () => {
     // 1. Search for "database"
-    pressKey('/');
+    enterSearch();
     typeChar('d');
     typeChar('a');
     typeChar('t');
@@ -1046,7 +1296,7 @@ describe('TUI — Combined workflow scenarios', () => {
     assert.ok(headerText().includes('[size]'));
 
     // Search
-    pressKey('/');
+    enterSearch();
     typeChar('a');
     pressEnter();
 
