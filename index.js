@@ -33,7 +33,9 @@
 const blessed = require('blessed');
 const fs = require('fs');
 const path = require('path');
-const { spawn, execSync } = require('child_process');
+const readline = require('readline');
+const { StringDecoder } = require('string_decoder');
+const { spawn, spawnSync, execSync } = require('child_process');
 const os = require('os');
 
 let excludePatterns = [];
@@ -111,6 +113,51 @@ function detectCLI() {
 }
 
 const CLI = detectCLI();
+const ABC_INPUT_SOURCE_ID = 'com.apple.keylayout.ABC';
+
+function switchToAbcInputSource(platform = process.platform, runCommand = spawnSync) {
+  if (platform !== 'darwin') return false;
+
+  const options = { stdio: 'ignore', timeout: 1000 };
+  try {
+    const macism = runCommand('macism', [ABC_INPUT_SOURCE_ID], options);
+    if (!macism.error && macism.status === 0) return true;
+  } catch (_) { /* try the built-in macOS fallback */ }
+
+  // macism is optional. JXA can call the same Carbon input-source API using
+  // only tools included with macOS and does not require Accessibility access.
+  const script = [
+    'ObjC.import("Carbon");',
+    'ObjC.bindFunction("TISCreateInputSourceList", ["id", ["id", "bool"]]);',
+    'ObjC.bindFunction("TISSelectInputSource", ["int", ["id"]]);',
+    `const filter = $({"TISPropertyInputSourceID": "${ABC_INPUT_SOURCE_ID}"});`,
+    'const sources = $.TISCreateInputSourceList(filter, false);',
+    'if (Number(sources.count) === 0) throw new Error("ABC input source not found");',
+    'const status = $.TISSelectInputSource(sources.objectAtIndex(0));',
+    'if (status !== 0) throw new Error("TISSelectInputSource failed: " + status);',
+  ].join(' ');
+
+  try {
+    const fallback = runCommand('/usr/bin/osascript', ['-l', 'JavaScript', '-e', script], options);
+    return !fallback.error && fallback.status === 0;
+  } catch (_) {
+    return false;
+  }
+}
+
+function createInputSourceActivator(
+  switchInputSource = switchToAbcInputSource,
+  now = Date.now,
+  debounceMs = 250,
+) {
+  let lastActivationAt = -Infinity;
+  return function activateInputSource() {
+    const currentTime = now();
+    if (currentTime - lastActivationAt < debounceMs) return false;
+    lastActivationAt = currentTime;
+    return switchInputSource();
+  };
+}
 
 // ─── Color Palette (Tokyo Night) ─────────────────────────────────────────────
 const PROJECT_COLORS = [
@@ -174,7 +221,10 @@ function updateSessionTitle(meta, session, newTitle) {
   if (!meta.sessions[session.sessionId]) meta.sessions[session.sessionId] = {};
   meta.sessions[session.sessionId].customTitle = normalizedTitle || undefined;
   if (!normalizedTitle) delete meta.sessions[session.sessionId].customTitle;
-  session.customTitle = normalizedTitle;
+  session._customTitleFromMeta = !!normalizedTitle;
+  // Clearing the local override reveals the next title in the established
+  // priority order instead of hiding the transcript title until restart.
+  session.customTitle = normalizedTitle || session._transcriptTitle || '';
   return normalizedTitle;
 }
 
@@ -212,7 +262,7 @@ function getProjectDisplayName(dirName) {
   return name || dirName.split('-').pop() || '~';
 }
 
-function loadSessionQuick(filePath, projectName) {
+function loadSessionQuick(filePath, projectName, options = {}) {
   const sessionId = path.basename(filePath, '.jsonl');
   const stat = fs.statSync(filePath);
 
@@ -250,6 +300,7 @@ function loadSessionQuick(filePath, projectName) {
   let firstUserMsg = '';
   let userMsgCount = 0;
   let customTitle = '';
+  let aiTitle = '';
 
   const headLines = headStr.split('\n').filter(Boolean);
   for (const line of headLines) {
@@ -263,9 +314,10 @@ function loadSessionQuick(filePath, projectName) {
       if (!cwd && d.cwd) cwd = d.cwd;
       if (!permissionMode && d.permissionMode) permissionMode = d.permissionMode;
       if (d.type === 'custom-title' && d.customTitle) customTitle = d.customTitle;
+      if (d.type === 'ai-title' && d.aiTitle) aiTitle = d.aiTitle;
       if (d.type === 'user') {
         userMsgCount++;
-        if (!firstUserMsg) firstUserMsg = extractUserText(d);
+        if (!firstUserMsg) firstUserMsg = extractSearchableUserText(d);
       }
     } catch (e) {
       // The line was truncated by the head buffer. Try to salvage metadata
@@ -286,22 +338,9 @@ function loadSessionQuick(filePath, projectName) {
         const cwdMatch = line.match(/"cwd"\s*:\s*"([^"]+)"/);
         if (cwdMatch) cwd = cwdMatch[1];
       }
-      // Try to extract user message text from the truncated JSON line.
-      // User messages have "type":"user" and text content embedded inside.
-      if (!firstUserMsg && /"type"\s*:\s*"user"/.test(line)) {
-        userMsgCount++;
-        // Match the text field inside message.content (handles both string
-        // content and array-of-objects content structures).
-        const textMatch = line.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)/) ||
-                          line.match(/"content"\s*:\s*"((?:[^"\\]|\\.)*)/);
-        if (textMatch) {
-          let text = '';
-          try { text = JSON.parse('"' + textMatch[1] + '"'); } catch { text = textMatch[1]; }
-          if (!text.startsWith('<local-command') && !text.startsWith('<command-')) {
-            firstUserMsg = text.substring(0, 200);
-          }
-        }
-      }
+      // A partial user record cannot safely reveal whether metadata flags or
+      // nested tool-result blocks occur beyond this buffer. The fallback full
+      // scan below handles topics only after parsing the complete JSON line.
     }
   }
 
@@ -313,13 +352,19 @@ function loadSessionQuick(filePath, projectName) {
         if (d.timestamp) lastTs = d.timestamp;
         if (d.type === 'user') {
           userMsgCount++;
-          // If no real user message was found in the head (all were commands),
-          // try to pick one from the tail as a fallback topic.
-          if (!firstUserMsg) firstUserMsg = extractUserText(d);
         }
         if (d.type === 'custom-title' && d.customTitle) customTitle = d.customTitle;
+        if (d.type === 'ai-title' && d.aiTitle) aiTitle = d.aiTitle;
       } catch (e) { /* partial line */ }
     }
+  }
+
+  // Metadata and a large trailing tool result can leave the first real prompt
+  // outside both quick samples. Only pay for a full scan when the normal fast
+  // path did not find a searchable user message.
+  const topicNeedsScan = !firstUserMsg && options.deferTopicScan && stat.size > HEAD_SIZE;
+  if (!firstUserMsg && !topicNeedsScan) {
+    firstUserMsg = findFirstSearchableUserMessage(filePath);
   }
 
   const estimatedMessages = Math.max(userMsgCount, Math.ceil(stat.size / 500 * 0.3));
@@ -339,11 +384,13 @@ function loadSessionQuick(filePath, projectName) {
 
   return {
     sessionId, project: projectName,
-    topic: topic || '(no user messages)',
-    customTitle, permissionMode,
+    topic: topic || (topicNeedsScan ? '(indexing topic…)' : '(no user messages)'),
+    customTitle: customTitle || aiTitle, permissionMode,
     firstTs, lastTs, version, gitBranch, cwd,
     fileSize: stat.size, duration: durationStr,
     estimatedMessages, filePath, _detailLoaded: false,
+    _transcriptTitle: customTitle || aiTitle,
+    _topicNeedsScan: topicNeedsScan,
   };
 }
 
@@ -363,21 +410,356 @@ function extractUserText(d) {
   return text;
 }
 
+function normalizeSearchableUserInput(text) {
+  if (typeof text !== 'string') return '';
+  let normalized = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, ' ').trim();
+  if (!normalized) return '';
+  if (/^\[Request interrupted by user(?: for tool use)?\]$/i.test(normalized)) return '';
+  if (/^<(?:task-notification|local-command(?:-caveat|-stdout)?)>/i.test(normalized)) return '';
+  if (/^<command-/i.test(normalized) && !/^<command-message>/i.test(normalized)) return '';
+
+  if (/<command-message>/i.test(normalized)) {
+    const commandName = normalized.match(/<command-name>([\s\S]*?)<\/command-name>/i)?.[1] || '';
+    const commandArgs = normalized.match(/<command-args>([\s\S]*?)<\/command-args>/i)?.[1] || '';
+    normalized = normalized
+      .replace(/<command-message>[\s\S]*?<\/command-message>/gi, ' ')
+      .replace(/<command-name>[\s\S]*?<\/command-name>/gi, ' ')
+      .replace(/<command-args>[\s\S]*?<\/command-args>/gi, ' ')
+      .trim();
+    return [commandName, commandArgs, normalized].filter(Boolean).join(' ').trim();
+  }
+
+  return normalized;
+}
+
+function extractSearchableUserText(entry) {
+  if (entry.type !== 'user' || entry.isMeta || entry.isSidechain) return '';
+  const content = entry.message && entry.message.content;
+  if (typeof content === 'string') return normalizeSearchableUserInput(content);
+  if (!Array.isArray(content)) return '';
+  return normalizeSearchableUserInput(content
+    .filter(part => part && part.type === 'text' && typeof part.text === 'string')
+    .map(part => part.text)
+    .join('\n'));
+}
+
+function classifyUserSearchEntry(entry) {
+  if (entry.type !== 'user' || entry.isMeta || entry.isSidechain) {
+    return { kind: 'internal', text: '' };
+  }
+  const content = entry.message && entry.message.content;
+  const rawText = typeof content === 'string'
+    ? content
+    : (Array.isArray(content)
+      ? content.filter(part => part && part.type === 'text').map(part => part.text || '').join('\n')
+      : '');
+  // Claude emits this as a standalone control record. Keep the exact match so
+  // quoted markers or reminder-bearing user text do not cancel a real turn.
+  if (/^\[Request interrupted by user(?: for tool use)?\]$/i.test(rawText.trim())) {
+    return { kind: 'interruption', text: '' };
+  }
+  const text = extractSearchableUserText(entry);
+  if (text) return { kind: 'searchable', text };
+  // Preserve the existing text-led session scope: attachment-only records do
+  // not create searchable turns solely for the full-text search feature.
+  return { kind: 'internal', text: '' };
+}
+
+function findFirstSearchableUserMessage(filePath) {
+  const fd = fs.openSync(filePath, 'r');
+  const chunk = Buffer.alloc(65536);
+  const decoder = new StringDecoder('utf8');
+  let lineSegments = [];
+
+  function inspect(line) {
+    if (!line || !isSearchRelevantLine(line) || isPureToolResultLine(line)) return '';
+    try {
+      return extractSearchableUserText(JSON.parse(line));
+    } catch (_) {
+      return '';
+    }
+  }
+
+  try {
+    while (true) {
+      const bytesRead = fs.readSync(fd, chunk, 0, chunk.length, null);
+      if (bytesRead === 0) break;
+      const decoded = decoder.write(chunk.subarray(0, bytesRead));
+      let start = 0;
+      for (let newline = decoded.indexOf('\n'); newline !== -1; newline = decoded.indexOf('\n', start)) {
+        const segment = decoded.slice(start, newline);
+        const line = lineSegments.length > 0 ? lineSegments.join('') + segment : segment;
+        lineSegments = [];
+        const text = inspect(line);
+        if (text) return text;
+        start = newline + 1;
+      }
+      if (start < decoded.length) lineSegments.push(decoded.slice(start));
+    }
+    const finalSegment = decoder.end();
+    if (finalSegment) lineSegments.push(finalSegment);
+    return inspect(lineSegments.join(''));
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function extractAssistantSearchEntry(entry) {
+  if (entry.type !== 'assistant' || entry.isSidechain) return { text: '', hasToolUse: false };
+  const message = entry.message;
+  if (!message || typeof message !== 'object') return { text: '', hasToolUse: false };
+  const content = message.content;
+  if (entry.isApiErrorMessage) {
+    return { text: '', hasToolUse: false };
+  }
+  if (!Array.isArray(content)) return { text: '', hasToolUse: false };
+  let text = content
+    .filter(part => part && part.type === 'text' && typeof part.text === 'string')
+    .map(part => part.text.trim())
+    .filter(Boolean)
+    .join('\n');
+  // Claude Code injects this reminder into assistant records; it is not a
+  // user-facing answer, but a real response can follow it in the same block.
+  if (/^The task tools haven't been used recently\./.test(text)) {
+    const reminderEnd = 'This is just a gentle reminder - ignore if not applicable.';
+    const endIndex = text.indexOf(reminderEnd);
+    // Without the known terminator there is no reliable boundary between the
+    // injected reminder and user-visible text, so exclude the ambiguous block.
+    text = endIndex === -1 ? '' : text.slice(endIndex + reminderEnd.length).trim();
+  }
+  if (text === 'No response requested.') text = '';
+  return { text, hasToolUse: content.some(part => part && part.type === 'tool_use') };
+}
+
+function isSearchRelevantLine(line) {
+  // Claude serializes top-level `type` after `message` in some records, so a
+  // long response may place it beyond the head prefix. The tail still avoids
+  // parsing large tool-result records while covering both known key orders.
+  const sample = line.length <= 8192
+    ? line
+    : line.substring(0, 4096) + line.slice(-4096);
+  return /"type"\s*:\s*"(?:user|assistant|custom-title|ai-title)"/.test(sample);
+}
+
+function isPureToolResultLine(line) {
+  // In Claude's JSONL schema the content block type precedes the potentially
+  // huge tool payload. Find the end of that first block without JSON.parse so
+  // multi-megabyte results stay cheap, but only skip when it is the array's
+  // sole block. Mixed tool_result + text records are real user input.
+  const head = line.substring(0, 4096);
+  const contentMatch = /"content"\s*:\s*\[\s*\{/.exec(head);
+  if (!contentMatch) return false;
+  const objectStart = contentMatch.index + contentMatch[0].lastIndexOf('{');
+  const blockPrefix = head.substring(objectStart);
+  // The optional tool_use_id prefix covers both observed key orders:
+  // {type, ...} and {tool_use_id, type, ...}.
+  if (!/^\{\s*(?:"tool_use_id"\s*:\s*"(?:[^"\\]|\\.)*"\s*,\s*)?"type"\s*:\s*"tool_result"/.test(blockPrefix)) {
+    return false;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = objectStart; i < line.length; i++) {
+    const char = line[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+    } else if (char === '{') {
+      depth++;
+    } else if (char === '}' && --depth === 0) {
+      let next = i + 1;
+      while (/\s/.test(line[next] || '')) next++;
+      return line[next] === ']';
+    }
+  }
+  return false;
+}
+
+async function buildSessionSearchText(session, options = {}) {
+  const userInputs = new Set();
+  const finalAnswers = new Set();
+  let transcriptCustomTitle = '';
+  let transcriptAiTitle = '';
+  let turnHasUserInput = false;
+  let completedAnswers = [];
+  let legacyCandidate = '';
+
+  function commitTurn() {
+    if (turnHasUserInput) {
+      if (completedAnswers.length > 0) {
+        for (const answer of completedAnswers) finalAnswers.add(answer.text);
+      } else if (legacyCandidate) {
+        finalAnswers.add(legacyCandidate);
+      }
+    }
+    completedAnswers = [];
+    legacyCandidate = '';
+    turnHasUserInput = false;
+  }
+
+  const input = fs.createReadStream(session.filePath, { encoding: 'utf-8' });
+  // Claude tool results can also be a large single JSONL record. As with the
+  // Codex indexer, local records are assumed to fit in memory so relevant user
+  // and final-answer messages can be retained without arbitrary truncation.
+  const lines = readline.createInterface({ input, crlfDelay: Infinity });
+
+  for await (const line of lines) {
+    if (options.isCancelled && options.isCancelled()) {
+      lines.close();
+      input.destroy();
+      return null;
+    }
+    if (isPureToolResultLine(line)) {
+      // Sidechain results follow a tool-use record, which has already cleared
+      // any main-thread legacy candidate, so this fast path need not parse them.
+      legacyCandidate = '';
+      continue;
+    }
+    // Do not regex-skip assistant tool-use records: their shape overlaps
+    // user-visible assistant text, while the large local payloads are tool
+    // results handled above. Parsing here preserves search correctness.
+    if (!isSearchRelevantLine(line)) continue;
+
+    let entry;
+    try { entry = JSON.parse(line); } catch (_) { continue; }
+
+    if (entry.type === 'custom-title' || entry.type === 'ai-title') {
+      const title = entry.type === 'custom-title' ? entry.customTitle : entry.aiTitle;
+      if (typeof title === 'string' && title.trim()) {
+        if (entry.type === 'custom-title') transcriptCustomTitle = title.trim();
+        else transcriptAiTitle = title.trim();
+      }
+      continue;
+    }
+
+    const userEntry = classifyUserSearchEntry(entry);
+    if (userEntry.kind === 'interruption') {
+      // stop_sequence output can be a valid final response, but not when the
+      // transcript immediately marks that generation as user-interrupted.
+      completedAnswers = completedAnswers.filter(answer => answer.stopReason === 'end_turn');
+      legacyCandidate = '';
+      continue;
+    }
+
+    if (userEntry.kind === 'searchable') {
+      commitTurn();
+      if (userEntry.text) userInputs.add(userEntry.text);
+      turnHasUserInput = true;
+      continue;
+    }
+
+    if (entry.type !== 'assistant' || entry.isSidechain || !turnHasUserInput) continue;
+    if (entry.isApiErrorMessage) {
+      // An API error closes an unfinished generation. Earlier status messages
+      // in the same turn are not the final answer; a later recovery can add a
+      // new completed candidate without discarding the searchable user input.
+      completedAnswers = [];
+      legacyCandidate = '';
+      continue;
+    }
+    const { text, hasToolUse } = extractAssistantSearchEntry(entry);
+    const stopReason = entry.message && entry.message.stop_reason;
+    if (hasToolUse || stopReason === 'tool_use') {
+      legacyCandidate = '';
+      continue;
+    }
+    if (!text) continue;
+    if (stopReason) {
+      completedAnswers.push({ text, stopReason });
+      legacyCandidate = '';
+    } else {
+      // Older Claude transcripts omit stop_reason. A pure-text response is a
+      // final-answer candidate unless a later tool call proves it was interim.
+      legacyCandidate = text;
+    }
+  }
+
+  commitTurn();
+  if (session._topicNeedsScan) {
+    const firstUserInput = userInputs.values().next().value || '';
+    let topic = firstUserInput.replace(/\n/g, ' ').trim();
+    if (topic.length > 120) topic = topic.substring(0, 120) + '…';
+    session.topic = topic || '(no user messages)';
+    session._topicNeedsScan = false;
+    session._topicResolvedInIndex = true;
+  }
+  const resolvedTranscriptTitle = transcriptCustomTitle || transcriptAiTitle;
+  session._transcriptTitle = resolvedTranscriptTitle;
+  if (resolvedTranscriptTitle && !session._customTitleFromMeta) {
+    const titleChanged = session.customTitle !== resolvedTranscriptTitle;
+    session.customTitle = resolvedTranscriptTitle;
+    if (titleChanged) session._titleResolvedInIndex = true;
+  }
+  // customTitle is searched directly by filterSessionList so runtime renames
+  // cannot leave a stale title embedded in this immutable transcript index.
+  return [...userInputs, ...finalAnswers].join('\n').toLowerCase();
+}
+
+function indexSessionsInBackground(sessions, options = {}) {
+  const schedule = options.schedule || setImmediate;
+  const onSessionIndexed = options.onSessionIndexed || (() => {});
+  const onComplete = options.onComplete || (() => {});
+  let nextIndex = 0;
+  let cancelled = false;
+
+  async function indexNextSession() {
+    if (cancelled) return;
+    if (nextIndex >= sessions.length) {
+      onComplete();
+      return;
+    }
+
+    const session = sessions[nextIndex++];
+    try {
+      const searchText = await buildSessionSearchText(session, {
+        isCancelled: () => cancelled,
+      });
+      if (cancelled) return;
+      session.searchText = searchText || '';
+      session._searchIndexError = null;
+    } catch (error) {
+      session.searchText = '';
+      session._searchIndexError = error;
+      // An I/O failure does not prove an unresolved transcript has no user
+      // messages; keep its pending topic rather than misclassifying it.
+    }
+    session._searchIndexed = true;
+    onSessionIndexed(session, nextIndex, sessions.length);
+    schedule(indexNextSession);
+  }
+
+  schedule(indexNextSession);
+  return () => { cancelled = true; };
+}
+
 function loadSessionDetail(session) {
   if (session._detailLoaded) return session;
   const lines = fs.readFileSync(session.filePath, 'utf-8').split('\n').filter(Boolean);
 
   let userMessages = [], assistantSnippets = [], totalMessages = 0;
+  let firstSearchableUserMessage = '';
+  let transcriptCustomTitle = '';
+  let transcriptAiTitle = '';
   let toolsUsed = new Set();
 
   for (const line of lines) {
     try {
       const d = JSON.parse(line);
-      if (d.type === 'custom-title' && d.customTitle) session.customTitle = d.customTitle;
+      if (d.type === 'custom-title' && d.customTitle) transcriptCustomTitle = d.customTitle;
+      if (d.type === 'ai-title' && d.aiTitle) transcriptAiTitle = d.aiTitle;
       if (d.type === 'user') {
         totalMessages++;
         const text = extractUserText(d);
         if (text) userMessages.push(text.substring(0, 300));
+        if (!firstSearchableUserMessage) {
+          firstSearchableUserMessage = extractSearchableUserText(d);
+        }
       }
       if (d.type === 'assistant') {
         totalMessages++;
@@ -402,16 +784,27 @@ function loadSessionDetail(session) {
   session.estimatedMessages = totalMessages;
   session.toolsUsed = Array.from(toolsUsed);
   session._detailLoaded = true;
+  session._transcriptTitle = transcriptCustomTitle || transcriptAiTitle;
+  if (!session._customTitleFromMeta) {
+    session.customTitle = session._transcriptTitle || session.customTitle;
+  }
 
-  if (userMessages.length > 0) {
-    let topic = userMessages[0].replace(/\n/g, ' ').trim();
+  if (firstSearchableUserMessage) {
+    let topic = firstSearchableUserMessage.replace(/\n/g, ' ').trim();
     if (topic.length > 120) topic = topic.substring(0, 120) + '…';
     session.topic = topic;
   }
   return session;
 }
 
-function loadAllSessions() {
+function isSessionListable(session) {
+  return !!session.firstTs
+    && session.topic !== '(no user messages)'
+    && !/^warmup$/i.test(session.topic.trim())
+    && !excludePatterns.some(re => re.test(session.topic));
+}
+
+function loadAllSessions(options = {}) {
   const sessions = [];
   if (!fs.existsSync(PROJECTS_DIR)) return sessions;
 
@@ -426,13 +819,14 @@ function loadAllSessions() {
     const files = fs.readdirSync(projPath).filter(f => f.endsWith('.jsonl'));
     for (const file of files) {
       try {
-        const session = loadSessionQuick(path.join(projPath, file), projectName);
+        const session = loadSessionQuick(path.join(projPath, file), projectName, options);
         // Skip sessions without timestamps, without real user messages, or warmup sessions
-        if (session.firstTs
-            && session.topic !== '(no user messages)'
-            && !/^warmup$/i.test(session.topic.trim())
-            && !excludePatterns.some(re => re.test(session.topic))
-        ) sessions.push(session);
+        // Keep unresolved sessions visible while the TUI resolves them in the
+        // background; synchronously enforcing topic exclusions would restore
+        // the startup pause this deferred path exists to remove.
+        if (session.firstTs && (session._topicNeedsScan || isSessionListable(session))) {
+          sessions.push(session);
+        }
       } catch (e) { /* skip */ }
     }
   }
@@ -443,6 +837,25 @@ function loadAllSessions() {
     return tb - ta;
   });
   return sessions;
+}
+
+function filterSessionList(sessions, filterText = '', projectFilter = '') {
+  const terms = filterText.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return sessions.filter(session => {
+    if (projectFilter && session.project !== projectFilter) return false;
+    if (terms.length === 0) return true;
+    const metadataHaystack = [
+      session.project,
+      session.topic,
+      session.customTitle || '',
+      session.gitBranch || '',
+      session.sessionId,
+    ].join(' ').toLowerCase();
+    // searchText is normalized once by the background indexer and can be much
+    // larger than the live metadata, so do not copy/lowercase it per keystroke.
+    const transcriptHaystack = session.searchText || '';
+    return terms.every(term => metadataHaystack.includes(term) || transcriptHaystack.includes(term));
+  });
 }
 
 // ─── Formatting Helpers ──────────────────────────────────────────────────────
@@ -502,8 +915,10 @@ function runListMode(limit) {
 
 // ─── TUI Application ────────────────────────────────────────────────────────
 
-function createApp() {
-  const allSessions = loadAllSessions();
+function createApp({ activateInputSource = createInputSourceActivator() } = {}) {
+  // Let the existing background index resolve ambiguous large transcripts so
+  // the TUI can render before any full-file fallback scan.
+  const allSessions = loadAllSessions({ deferTopicScan: true });
   const meta = loadMeta();
 
   // Apply meta customTitles — these take priority over JSONL titles
@@ -512,18 +927,24 @@ function createApp() {
     const sm = meta.sessions[session.sessionId];
     if (sm && sm.customTitle) {
       session.customTitle = sm.customTitle;
+      session._customTitleFromMeta = true;
     }
   }
 
   let filteredSessions = [...allSessions];
   let selectedIndex = -1;  // -1 = "New Session", 0+ = session index
   let filterText = '';
+  let projectFilter = '';
   let isSearchMode = false;
   let sortMode = 'time';
+  let searchIndexing = allSessions.length > 0;
+  let pendingIndexRefresh = false;
+  let indexRefreshTimer = null;
+  let cancelSearchIndexing = () => {};
 
   const projectColorMap = new Map();
-  const uniqueProjects = [...new Set(allSessions.map(s => s.project))];
-  uniqueProjects.forEach(p => getProjectColor(p, projectColorMap));
+  const getUniqueProjects = () => [...new Set(allSessions.map(s => s.project))];
+  getUniqueProjects().forEach(p => getProjectColor(p, projectColorMap));
 
   // ─── Screen ────────────────────────────────────────────────────────────
   const screen = blessed.screen({
@@ -533,6 +954,22 @@ function createApp() {
     fullUnicode: true,
     autoPadding: true,
     dockBorders: true,
+    sendFocus: true,
+  });
+
+  // Terminal focus reporting also covers tmux pane/window selection when
+  // tmux has focus-events enabled. Arm the mouse fallback only after blur so
+  // ordinary TUI clicks never launch synchronous input-source subprocesses.
+  let inputSourceActivationPending = false;
+  screen.on('blur', () => { inputSourceActivationPending = true; });
+  screen.on('focus', () => {
+    inputSourceActivationPending = false;
+    activateInputSource();
+  });
+  screen.on('mousedown', () => {
+    if (!inputSourceActivationPending) return;
+    inputSourceActivationPending = false;
+    activateInputSource();
   });
 
   // Force screen-level fill color so no terminal bg leaks through
@@ -547,14 +984,17 @@ function createApp() {
   function updateHeader() {
     const title = '{bold}{#7aa2f7-fg}Claude Starter{/}';
     const count = `{#9ece6a-fg}${filteredSessions.length}{/}{#565f89-fg}/${allSessions.length} sessions{/}`;
-    const proj = `{#bb9af7-fg}${uniqueProjects.length}{/}{#565f89-fg} projects{/}`;
+    const proj = `{#bb9af7-fg}${getUniqueProjects().length}{/}{#565f89-fg} projects{/}`;
     const sort = `{#73daca-fg}[${sortMode}]{/}`;
     const search = isSearchMode
       ? `{#e0af68-fg}/ ${filterText}▌{/}`
       : (filterText ? `{#e0af68-fg}/ ${filterText}{/}` : '');
+    const project = projectFilter ? `{#7dcfff-fg}[${projectFilter}]{/}` : '';
     let parts = [title, count, proj];
     parts.push(sort);
+    if (project) parts.push(project);
     if (search) parts.push(search);
+    if (searchIndexing) parts.push('{#565f89-fg}indexing search…{/}');
     header.setContent(`\n ${parts.join(' {#414868-fg}│{/} ')}`);
   }
 
@@ -582,13 +1022,38 @@ function createApp() {
   blessed.line({ parent: screen, top: 4, left: '50%', height: '100%-7', orientation: 'vertical', style: { fg: '#414868', bg: '#1a1b26' } });
 
   // ─── Right Panel ───────────────────────────────────────────────────────
+  // The session metadata and resume command stay fixed. Only the conversation
+  // viewport between them is scrollable.
   const detailPanel = blessed.box({
     parent: screen,
     top: 4, left: '50%+1', width: '50%-1', height: '100%-7',
+    style: { bg: '#1a1b26' },
+  });
+
+  const detailMetaPanel = blessed.box({
+    parent: detailPanel,
+    name: 'detail-meta',
+    top: 0, left: 0, width: '100%', height: 1,
+    tags: true,
+    style: { bg: '#1a1b26' },
+  });
+
+  const detailMessagesPanel = blessed.box({
+    parent: detailPanel,
+    name: 'detail-messages',
+    top: 1, left: 0, width: '100%', bottom: 4,
     tags: true, scrollable: true, alwaysScroll: true,
     scrollbar: { ch: '▐', style: { fg: '#565f89' } },
     style: { bg: '#1a1b26' },
     mouse: true,
+  });
+
+  const detailActionPanel = blessed.box({
+    parent: detailPanel,
+    name: 'detail-action',
+    bottom: 0, left: 0, width: '100%', height: 4,
+    tags: true,
+    style: { bg: '#1a1b26' },
   });
 
   blessed.line({ parent: screen, bottom: 2, left: 0, width: '100%', orientation: 'horizontal', style: { fg: '#414868', bg: '#1a1b26' } });
@@ -701,35 +1166,135 @@ function createApp() {
   }
 
   // ─── Render Detail Panel ───────────────────────────────────────────────
-  function renderDetail() {
+  let currentMetaContent = '';
+  let currentMessagesContent = '';
+  let currentActionContent = '';
+  let detailUsesUnifiedScroll = false;
+  let unifiedMetaHeight = 0;
+  let currentDetailKey = null;
+
+  function layoutDetailPanels() {
+    detailMetaPanel.parseContent();
+    detailActionPanel.parseContent();
+
+    const requestedMetaHeight = currentMetaContent ? detailMetaPanel.getScreenLines().length : 0;
+    const requestedActionHeight = currentActionContent ? detailActionPanel.getScreenLines().length : 0;
+    const previousMessagesContent = detailMessagesPanel.content;
+    const previousMessageBase = detailMessagesPanel.childBase || 0;
+    const previousMessageOffset = detailMessagesPanel.childOffset || 0;
+    detailMessagesPanel.setContent(currentMetaContent);
+    const requestedUnifiedMetaHeight = currentMetaContent
+      ? detailMessagesPanel.getScreenLines().length
+      : 0;
+    detailMessagesPanel.setContent(previousMessagesContent);
+    detailMessagesPanel.childBase = previousMessageBase;
+    detailMessagesPanel.childOffset = previousMessageOffset;
+    const availableHeight = detailPanel.height || Math.max(1, (screen.height || 24) - 7);
+    const useUnifiedScroll = requestedMetaHeight + requestedActionHeight + 1 > availableHeight;
+    const messagesContent = useUnifiedScroll
+      ? [currentMetaContent, currentMessagesContent, currentActionContent].filter(Boolean).join('\n')
+      : currentMessagesContent;
+
+    const messagesChanged = detailMessagesPanel.content !== messagesContent;
+    let nextMessageBase = previousMessageBase;
+    if (messagesChanged) {
+      detailMessagesPanel.setContent(messagesContent);
+    }
+
+    if (useUnifiedScroll !== detailUsesUnifiedScroll) {
+      nextMessageBase += useUnifiedScroll ? requestedUnifiedMetaHeight : -unifiedMetaHeight;
+    } else if (useUnifiedScroll) {
+      // Unified mode is only a cramped-terminal fallback. Preserve the message
+      // prefix, but accept recoverable viewport shifts instead of tracking
+      // separate metadata/message/action anchors across terminal resizes.
+      nextMessageBase += requestedUnifiedMetaHeight - unifiedMetaHeight;
+    } else if (messagesChanged) {
+      nextMessageBase = 0;
+    }
+
+    detailMessagesPanel.childBase = nextMessageBase;
+    detailMessagesPanel.childOffset = 0;
+    detailUsesUnifiedScroll = useUnifiedScroll;
+    unifiedMetaHeight = useUnifiedScroll ? requestedUnifiedMetaHeight : 0;
+
+    if (useUnifiedScroll) {
+      detailMetaPanel.height = 0;
+      detailMessagesPanel.top = 0;
+      detailMessagesPanel.bottom = 0;
+      detailActionPanel.height = 0;
+    } else {
+      detailMetaPanel.height = requestedMetaHeight;
+      detailMessagesPanel.top = requestedMetaHeight;
+      detailMessagesPanel.bottom = requestedActionHeight;
+      detailActionPanel.height = requestedActionHeight;
+    }
+
+    // childBase is the actual rendered viewport. getScroll()/setScroll() also
+    // include childOffset and are not idempotent when alwaysScroll is enabled.
+    detailMessagesPanel.parseContent();
+    const visibleMessages = useUnifiedScroll
+      ? availableHeight
+      : availableHeight - requestedMetaHeight - requestedActionHeight;
+    const maxMessageBase = Math.max(0, detailMessagesPanel.getScreenLines().length - visibleMessages);
+    detailMessagesPanel.childBase = Math.max(0,
+      Math.min(detailMessagesPanel.childBase || 0, maxMessageBase));
+    detailMessagesPanel.childOffset = 0;
+  }
+
+  function setDetailContent(metaContent, messagesContent, actionContent, detailKey = null) {
+    const detailChanged = detailKey !== currentDetailKey;
+    currentMetaContent = metaContent;
+    currentMessagesContent = messagesContent;
+    currentActionContent = actionContent;
+    detailMetaPanel.setContent(metaContent);
+    detailActionPanel.setContent(actionContent);
+    layoutDetailPanels();
+    if (detailChanged) detailMessagesPanel.setScroll(0);
+    currentDetailKey = detailKey;
+  }
+
+  screen.on('resize', () => {
+    layoutDetailPanels();
+    screen.render();
+  });
+
+  function renderDetail(options = {}) {
+    const sep = ` {#414868-fg}${'─'.repeat(44)}{/}`;
+
     if (selectedIndex === -1) {
       const cli = CLI.name;
       const defaultMode = meta.defaultPermissionMode || '';
       const modeFlag = (defaultMode && defaultMode !== 'default') ? ` --permission-mode ${defaultMode}` : '';
-      let c = '';
-      c += `\n {#9ece6a-fg}{bold}Start a New Conversation{/}\n`;
-      c += ` {#414868-fg}${'─'.repeat(44)}{/}\n\n`;
-      c += ` {#a9b1d6-fg}Open a fresh Claude session and start{/}\n`;
-      c += ` {#a9b1d6-fg}coding from scratch.{/}\n\n`;
-      c += ` {#565f89-fg}Working Dir{/}  {#7dcfff-fg}${process.cwd()}{/}\n`;
-      c += ` {#565f89-fg}CLI{/}          {#73daca-fg}${cli}{/}\n`;
+      let metaContent = ` {#9ece6a-fg}{bold}Start a New Conversation{/}\n${sep}\n`;
+      metaContent += ` {#565f89-fg}Working Dir{/}  {#7dcfff-fg}${process.cwd()}{/}\n`;
+      metaContent += ` {#565f89-fg}CLI{/}          {#73daca-fg}${cli}{/}`;
       if (defaultMode && defaultMode !== 'default') {
-        c += ` {#565f89-fg}Mode{/}         {#f7768e-fg}${defaultMode}{/}\n`;
+        metaContent += `\n {#565f89-fg}Mode{/}         {#f7768e-fg}${defaultMode}{/}`;
       }
-      c += ` {#565f89-fg}Command{/}      {#565f89-fg}${cli}${modeFlag}{/}\n\n`;
-      c += ` {#414868-fg}${'─'.repeat(44)}{/}\n`;
-      c += ` {#9ece6a-fg}{bold}↵ Enter{/}{#9ece6a-fg} or {/}{#9ece6a-fg}{bold}n{/}{#9ece6a-fg} to launch{/}\n`;
-      detailPanel.setContent(c);
-      detailPanel.setScroll(0);
+      metaContent += `\n {#565f89-fg}Command{/}      {#565f89-fg}${cli}${modeFlag}{/}`;
+      const messagesContent = '\n {#a9b1d6-fg}Open a fresh Claude session and start{/}'
+        + '\n {#a9b1d6-fg}coding from scratch.{/}';
+      const actionContent = `${sep}\n {#9ece6a-fg}{bold}↵ Enter{/}{#9ece6a-fg} or {/}`
+        + `{#9ece6a-fg}{bold}n{/}{#9ece6a-fg} to launch{/}\n`;
+      setDetailContent(metaContent, messagesContent, actionContent, 'new-session');
       return;
     }
 
     if (filteredSessions.length === 0 || !filteredSessions[selectedIndex]) {
-      detailPanel.setContent('\n  {#565f89-fg}No session selected{/}');
+      setDetailContent('', '\n  {#565f89-fg}No session selected{/}', '');
       return;
     }
 
     const session = filteredSessions[selectedIndex];
+    if (options.deferLoad && !session._detailLoaded) {
+      setDetailContent('',
+        `\n {#7dcfff-fg}{bold}${esc(session.customTitle || session.topic)}{/}\n\n`
+        + ' {#565f89-fg}Search match indexed. Navigate to load its preview.{/}',
+        '', session.sessionId,
+      );
+      return;
+    }
+    const previousListLabel = session.customTitle || session.topic;
     loadSessionDetail(session);
 
     // Meta customTitle takes priority over JSONL
@@ -737,15 +1302,14 @@ function createApp() {
     if (sm && sm.customTitle) session.customTitle = sm.customTitle;
 
     const color = getProjectColor(session.project, projectColorMap);
-    let c = '';
-    const sep = ` {#414868-fg}${'─'.repeat(44)}{/}`;
+    let metaContent = '';
 
     // Title
-    c += `\n {${color}-fg}{bold}█ ${session.project}{/}\n`;
+    metaContent += ` {${color}-fg}{bold}█ ${session.project}{/}\n`;
     if (session.customTitle) {
-      c += ` {#73daca-fg}{bold}${esc(session.customTitle)}{/}\n`;
+      metaContent += ` {#73daca-fg}{bold}${esc(session.customTitle)}{/}\n`;
     }
-    c += sep + '\n\n';
+    metaContent += sep + '\n\n';
 
     const fields = [
       ['Session', `{#7dcfff-fg}${session.sessionId}{/}`],
@@ -766,78 +1330,112 @@ function createApp() {
     }
 
     for (const [label, value] of fields) {
-      c += ` {#565f89-fg}${label.padEnd(12)}{/} ${value}\n`;
+      metaContent += ` {#565f89-fg}${label.padEnd(12)}{/} ${value}\n`;
     }
 
     if (session.toolsUsed && session.toolsUsed.length > 0) {
-      c += `\n {#7dcfff-fg}{bold}Tools Used{/}\n`;
+      metaContent += `\n {#7dcfff-fg}{bold}Tools Used{/}\n`;
       const chips = session.toolsUsed.slice(0, 10).map(t => `{#414868-fg}[{/}{#7dcfff-fg}${t}{/}{#414868-fg}]{/}`).join(' ');
-      c += ` ${chips}\n`;
-      if (session.toolsUsed.length > 10) c += ` {#565f89-fg}+${session.toolsUsed.length - 10} more{/}\n`;
+      metaContent += ` ${chips}\n`;
+      if (session.toolsUsed.length > 10) metaContent += ` {#565f89-fg}+${session.toolsUsed.length - 10} more{/}\n`;
     }
 
-    c += `\n {#bb9af7-fg}{bold}Conversation{/}\n`;
-    c += sep + '\n';
+    metaContent += `\n {#bb9af7-fg}{bold}Conversation{/}\n`;
+    metaContent += sep;
 
-    const detailHeight = detailPanel.height || screen.height || 24;
-    const previewLimit = Math.max(10, Math.floor(Math.max(0, detailHeight - 18) / 3));
-    const msgs = (session.userMessages || []).slice(0, previewLimit);
-    const assists = (session.assistantSnippets || []);
-
-    if (msgs.length === 0) {
-      c += `\n  {#565f89-fg}(no readable messages){/}\n`;
+    let messagesContent = '';
+    const messages = session.userMessages || [];
+    const assists = session.assistantSnippets || [];
+    if (messages.length === 0) {
+      messagesContent = `\n  {#565f89-fg}(no readable messages){/}`;
     } else {
-      msgs.forEach((msg, i) => {
-        const clean = esc(msg.replace(/\n/g, ' ').trim());
+      messages.forEach((message, index) => {
+        const clean = esc(message.replace(/\n/g, ' ').trim());
         const trunc = clean.length > 80 ? clean.substring(0, 80) + '…' : clean;
-        c += `\n {#7aa2f7-fg}{bold}You >{/} ${trunc}\n`;
-        if (assists[i]) {
-          const aClean = esc(assists[i].replace(/\n/g, ' ').trim());
-          const aTrunc = aClean.length > 80 ? aClean.substring(0, 80) + '…' : aClean;
-          c += ` {#9ece6a-fg}Claude >{/} {#565f89-fg}${aTrunc}{/}\n`;
+        messagesContent += `${messagesContent ? '\n' : ''}\n {#7aa2f7-fg}{bold}You >{/} ${trunc}`;
+        if (assists[index]) {
+          const assistantClean = esc(assists[index].replace(/\n/g, ' ').trim());
+          const assistantTrunc = assistantClean.length > 80
+            ? assistantClean.substring(0, 80) + '…'
+            : assistantClean;
+          messagesContent += `\n {#9ece6a-fg}Claude >{/} {#565f89-fg}${assistantTrunc}{/}`;
         }
       });
     }
 
-    c += `\n${sep}`;
-    c += `\n {#9ece6a-fg}{bold}↵ Enter{/}{#9ece6a-fg} to resume this conversation{/}`;
-    c += `\n {#565f89-fg}${CLI.name} --resume ${session.sessionId}{/}\n`;
+    const actionContent = `${sep}`
+      + `\n {#9ece6a-fg}{bold}↵ Enter{/}{#9ece6a-fg} to resume this conversation{/}`
+      + `\n {#565f89-fg}${CLI.name} --resume ${session.sessionId}{/}\n`;
 
-    detailPanel.setContent(c);
-    detailPanel.setScroll(0);
+    setDetailContent(metaContent, messagesContent, actionContent, session.sessionId);
+    if ((session.customTitle || session.topic) !== previousListLabel) refreshList();
   }
 
   // ─── Render All ────────────────────────────────────────────────────────
-  function renderAll() {
+  function renderAll(options = {}) {
     updateHeader();
     refreshList();
-    renderDetail();
+    renderDetail(options);
     updateFooter();
     listPanel.focus();
     screen.render();
   }
 
   // ─── Filter ────────────────────────────────────────────────────────────
-  function applyFilter() {
-    if (!filterText) {
-      filteredSessions = [...allSessions];
+  function applyFilter(options = {}) {
+    const hadFilteredResults = filteredSessions.length > 0;
+    const previousChildBase = listPanel.childBase;
+    const selectedSession = options.preserveSelection && selectedIndex >= 0
+      ? filteredSessions[selectedIndex]
+      : null;
+    filteredSessions = filterSessionList(allSessions, filterText, projectFilter);
+    if (selectedSession && filteredSessions.includes(selectedSession)) {
+      selectedIndex = filteredSessions.indexOf(selectedSession);
     } else {
-      const terms = filterText.toLowerCase().split(/\s+/);
-      filteredSessions = allSessions.filter(s => {
-        const haystack = [s.project, s.topic, s.customTitle || '', s.gitBranch || '', s.sessionId, ...(s.userMessages || [])].join(' ').toLowerCase();
-
-        return terms.every(t => {
-          return haystack.includes(t);
-        });
-      });
+      selectedIndex = Math.min(selectedIndex, Math.max(-1, filteredSessions.length - 1));
     }
-    selectedIndex = Math.min(selectedIndex, Math.max(-1, filteredSessions.length - 1));
-    // When filtering, select first result; when clearing, select New Session
-    if (filterText && filteredSessions.length > 0) {
+    if (!options.preserveSelection && (filterText || projectFilter) && filteredSessions.length > 0) {
+      selectedIndex = 0;
+    } else if (options.preserveSelection && !hadFilteredResults
+        && (filterText || projectFilter) && filteredSessions.length > 0) {
       selectedIndex = 0;
     }
-    listPanel.childBase = 0;  // reset scroll to top
-    renderAll();
+    if (options.preserveSelection) {
+      const visibleRows = Math.max(1, listPanel.height || 1);
+      const maxBase = Math.max(0, filteredSessions.length + 1 - visibleRows);
+      const selectedRow = selectedIndex + 1;
+      let nextBase = Math.min(previousChildBase, maxBase);
+      if (selectedRow < nextBase) nextBase = selectedRow;
+      if (selectedRow >= nextBase + visibleRows) nextBase = selectedRow - visibleRows + 1;
+      listPanel.childBase = Math.max(0, Math.min(nextBase, maxBase));
+    } else {
+      listPanel.childBase = 0;
+    }
+    renderAll({ deferLoad: options.preserveSelection });
+  }
+
+  function applyPendingIndexRefresh() {
+    if (!pendingIndexRefresh || popupOpen || renameMode) return false;
+    pendingIndexRefresh = false;
+    applyFilter({ preserveSelection: true });
+    return true;
+  }
+
+  function refreshIndexedSearchResults() {
+    if (!filterText && !projectFilter) return;
+    if (popupOpen || renameMode) {
+      pendingIndexRefresh = true;
+    } else {
+      applyFilter({ preserveSelection: true });
+    }
+  }
+
+  function scheduleIndexRefresh() {
+    if ((!filterText && !projectFilter) || indexRefreshTimer) return;
+    indexRefreshTimer = setTimeout(() => {
+      indexRefreshTimer = null;
+      refreshIndexedSearchResults();
+    }, 50);
   }
 
   // ─── Sort ──────────────────────────────────────────────────────────────
@@ -859,7 +1457,8 @@ function createApp() {
   let popupOpen = false;
 
   function showProjectPicker() {
-    const projects = ['  All Projects', ...uniqueProjects.map(p => `  ${p}`)];
+    const projectNames = getUniqueProjects();
+    const projects = ['  All Projects', ...projectNames.map(p => `  ${p}`)];
     const popup = blessed.list({
       parent: screen, top: 'center', left: 'center',
       width: Math.min(50, Math.max(...projects.map(p => p.length)) + 8),
@@ -876,10 +1475,14 @@ function createApp() {
     popupOpen = true;
     popup.focus(); screen.render();
     popup.on('select', (item, index) => {
-      filterText = index === 0 ? '' : uniqueProjects[index - 1];
+      projectFilter = index === 0 ? '' : projectNames[index - 1];
+      pendingIndexRefresh = false;
       popup.destroy(); popupOpen = false; selectedIndex = 0; applyFilter();
     });
-    popup.key(['escape', 'q'], () => { popup.destroy(); popupOpen = false; screen.render(); });
+    popup.key(['escape', 'q'], () => {
+      popup.destroy(); popupOpen = false;
+      if (!applyPendingIndexRefresh()) screen.render();
+    });
   }
 
   // ─── Key Bindings ──────────────────────────────────────────────────────
@@ -965,7 +1568,7 @@ function createApp() {
 
   // Search
   screen.key(['/'], () => {
-    if (renameMode || isSearchMode) return;
+    if (renameMode || isSearchMode || popupOpen) return;
     isSearchMode = true;
     if (!filterText) filterText = '';  // keep existing filterText if any
     updateHeader(); updateFooter(); screen.render();
@@ -984,7 +1587,7 @@ function createApp() {
       if (key.name === 'escape') {
         closeRename();
         listPanel.focus();
-        screen.render();
+        if (!applyPendingIndexRefresh()) screen.render();
         return;
       }
       if (key.name === 'backspace') {
@@ -999,6 +1602,21 @@ function createApp() {
         renderRenameInput();
       }
       return;  // swallow all keys while in rename mode
+    }
+
+    if (key.name === 'escape') {
+      if (popupOpen) return;
+      if (isSearchMode) {
+        isSearchMode = false;
+        filterText = '';
+        applyFilter();
+        return;
+      }
+      filterText = '';
+      projectFilter = '';
+      selectedIndex = -1;
+      applyFilter();
+      return;
     }
 
     // Backspace: delete search char, or exit search mode if empty
@@ -1037,7 +1655,6 @@ function createApp() {
 
     if (!isSearchMode) return;
     if (key.name === 'return' || key.name === 'enter') { isSearchMode = false; searchJustConfirmed = true; renderAll(); return; }
-    if (key.name === 'escape') { isSearchMode = false; filterText = ''; applyFilter(); return; }
     // Only accept printable characters (exclude control chars like \r \n \t)
     if (ch && ch.length === 1 && ch.charCodeAt(0) >= 32 && !key.ctrl && !key.meta) { filterText += ch; selectedIndex = -1; applyFilter(); }
   });
@@ -1046,6 +1663,7 @@ function createApp() {
   // Auto-detect: use mai-claude if available, otherwise fall back to claude
 
   function resumeSession(session, modeOverride) {
+    cancelSearchIndexing();
     process.stdout.write('\x1b[0m');
     screen.destroy();
 
@@ -1072,6 +1690,7 @@ function createApp() {
   }
 
   function startNewSession() {
+    cancelSearchIndexing();
     process.stdout.write('\x1b[0m');
     screen.destroy();
 
@@ -1120,13 +1739,13 @@ function createApp() {
 
   // Quick shortcut: n = new session
   screen.key(['n'], () => {
-    if (renameMode || isSearchMode) return;
+    if (renameMode || isSearchMode || popupOpen) return;
     startNewSession();
   });
 
   // Copy session ID
   screen.key(['c'], () => {
-    if (renameMode || isSearchMode) return;
+    if (renameMode || isSearchMode || popupOpen) return;
     if (filteredSessions.length === 0) return;
     const sid = filteredSessions[selectedIndex].sessionId;
     try {
@@ -1169,7 +1788,7 @@ function createApp() {
       confirmPopup.key(['escape', 'q'], () => {
         confirmPopup.destroy();
         popupOpen = false;
-        renderAll();
+        if (!applyPendingIndexRefresh()) renderAll();
       });
     }, 50);
   }
@@ -1236,7 +1855,8 @@ function createApp() {
         // Clear global default
         setGlobalPermissionMode(meta, '');
         footer.setContent(`\n  {#9ece6a-fg}{bold}> Global default mode cleared{/}`);
-        popup.destroy(); popupOpen = false; renderAll();
+        popup.destroy(); popupOpen = false;
+        if (!applyPendingIndexRefresh()) renderAll();
         setTimeout(() => { updateFooter(); screen.render(); }, 1500);
         return;
       }
@@ -1255,7 +1875,8 @@ function createApp() {
         const mode = PERMISSION_MODES[index - globalHeaderIdx - 1];
         setGlobalPermissionMode(meta, mode === 'default' ? '' : mode);
         footer.setContent(`\n  {#9ece6a-fg}{bold}> Global default:{/} {#bb9af7-fg}${mode}{/}`);
-        popup.destroy(); popupOpen = false; renderAll();
+        popup.destroy(); popupOpen = false;
+        if (!applyPendingIndexRefresh()) renderAll();
         setTimeout(() => { updateFooter(); screen.render(); }, 1500);
         return;
       }
@@ -1264,7 +1885,7 @@ function createApp() {
     popup.key(['escape', 'q'], () => {
       popup.destroy();
       popupOpen = false;
-      renderAll();
+      if (!applyPendingIndexRefresh()) renderAll();
     });
   }
 
@@ -1331,13 +1952,14 @@ function createApp() {
       popupOpen = false;
       deleteSession(session);
       footer.setContent(`\n  {#f7768e-fg}{bold}✗ Deleted:{/} {#565f89-fg}${session.sessionId}{/}`);
-      renderAll();
+      pendingIndexRefresh = false;
+      applyFilter({ preserveSelection: true });
       setTimeout(() => { updateFooter(); screen.render(); }, 1500);
     });
     confirmPopup.key(['n', 'escape', 'q'], () => {
       confirmPopup.destroy();
       popupOpen = false;
-      screen.render();
+      if (!applyPendingIndexRefresh()) screen.render();
     });
   }
 
@@ -1444,7 +2066,7 @@ function createApp() {
         renameConfirmPopup = null;
         renameConfirmSession = null;
         popupOpen = false;
-        renderAll();
+        if (!applyPendingIndexRefresh()) renderAll();
       });
     }, 50);
   }
@@ -1455,14 +2077,22 @@ function createApp() {
     showRenameInput(filteredSessions[selectedIndex]);
   });
 
-  screen.key(['s'], () => { if (!renameMode && !isSearchMode) cycleSort(); });
-  screen.key(['p'], () => { if (!renameMode && !isSearchMode) showProjectPicker(); });
-  screen.key(['escape'], () => {
-    if (renameMode) return;  // handled in keypress
-    if (isSearchMode) { isSearchMode = false; filterText = ''; applyFilter(); return; }
-    filterText = ''; selectedIndex = -1; applyFilter();
+  screen.key(['s'], () => { if (!renameMode && !isSearchMode && !popupOpen) cycleSort(); });
+  screen.key(['p'], () => { if (!renameMode && !isSearchMode && !popupOpen) showProjectPicker(); });
+  function quitApp() {
+    cancelSearchIndexing();
+    process.stdout.write('\x1b[0m');
+    screen.destroy();
+    process.exit(0);
+  }
+  screen.key(['q'], () => {
+    if (renameMode || popupOpen) return;
+    quitApp();
   });
-  screen.key(['q', 'C-c'], () => { if (renameMode) return; process.stdout.write('\x1b[0m'); screen.destroy(); process.exit(0); });
+  screen.key(['C-c'], () => {
+    if (renameMode) return;
+    quitApp();
+  });
 
   // Remove blessed's built-in wheel handlers (they call select which changes selection)
   listPanel.removeAllListeners('element wheeldown');
@@ -1500,13 +2130,57 @@ function createApp() {
     }
   });
 
-  // Mouse wheel on detail
-  detailPanel.on('wheeldown', () => { detailPanel.scroll(2); screen.render(); });
-  detailPanel.on('wheelup', () => { detailPanel.scroll(-2); screen.render(); });
+  // Mouse wheel only scrolls the conversation viewport. Metadata and the
+  // resume command are separate, fixed panels.
+  detailMessagesPanel.removeAllListeners('wheeldown');
+  detailMessagesPanel.removeAllListeners('wheelup');
+  detailMessagesPanel.on('wheeldown', () => { detailMessagesPanel.scroll(2); screen.render(); });
+  detailMessagesPanel.on('wheelup', () => { detailMessagesPanel.scroll(-2); screen.render(); });
 
   // ─── Go! ───────────────────────────────────────────────────────────────
   renderAll();
   listPanel.focus();
+  const cancelBackgroundIndexing = indexSessionsInBackground([...allSessions], {
+    onSessionIndexed: session => {
+      const topicResolved = session._topicResolvedInIndex;
+      const titleResolved = session._titleResolvedInIndex;
+      if (topicResolved || titleResolved) {
+        session._topicResolvedInIndex = false;
+        session._titleResolvedInIndex = false;
+        if (topicResolved && !isSessionListable(session)) {
+          const index = allSessions.indexOf(session);
+          if (index !== -1) allSessions.splice(index, 1);
+        }
+        if (popupOpen || renameMode) {
+          pendingIndexRefresh = true;
+        } else {
+          applyFilter({ preserveSelection: true });
+        }
+      } else {
+        scheduleIndexRefresh();
+      }
+    },
+    onComplete: () => {
+      searchIndexing = false;
+      if (indexRefreshTimer) {
+        clearTimeout(indexRefreshTimer);
+        indexRefreshTimer = null;
+      }
+      if (filterText || projectFilter) {
+        refreshIndexedSearchResults();
+      } else {
+        updateHeader();
+        screen.render();
+      }
+    },
+  });
+  cancelSearchIndexing = () => {
+    cancelBackgroundIndexing();
+    if (indexRefreshTimer) {
+      clearTimeout(indexRefreshTimer);
+      indexRefreshTimer = null;
+    }
+  };
 }
 
 // ─── Exports for Testing ────────────────────────────────────────────────────
@@ -1518,9 +2192,13 @@ if (typeof module !== 'undefined') {
     // Data helpers
     getProjectDisplayName,
     extractUserText,
+    extractSearchableUserText,
     loadSessionQuick,
     loadSessionDetail,
+    buildSessionSearchText,
+    indexSessionsInBackground,
     loadAllSessions,
+    filterSessionList,
     // Formatting
     formatTimestamp,
     formatFileSize,
@@ -1543,6 +2221,8 @@ if (typeof module !== 'undefined') {
     META_FILE,
     // CLI
     detectCLI,
+    switchToAbcInputSource,
+    createInputSourceActivator,
     // List mode (for integration tests)
     runListMode,
     // TUI (for interaction tests)
@@ -1657,5 +2337,7 @@ TUI Keyboard Shortcuts:
     process.exit(0);
   }
 
-  createApp();
+  const activateInputSource = createInputSourceActivator();
+  activateInputSource();
+  createApp({ activateInputSource });
 }

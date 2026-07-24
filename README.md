@@ -60,7 +60,9 @@ Beautiful split-pane UI with Tokyo Night colors. The left panel shows every sess
 
 Press `/` and start typing. **That's it.** No Enter needed.
 
-Searches across **everything** — project names, Git branches, conversation content. Results update as you type, `↑↓` to navigate instantly.
+Searches session and renamed titles, project names, Git branches, your prompts, and Claude's final responses. Tool calls and results, thinking, edit payloads, and other internal records are intentionally excluded. Results update as you type; use `↑↓` to navigate instantly.
+
+The TUI opens immediately and builds the conversation index in the background. While the header shows `indexing search…`, matching results appear incrementally as sessions are indexed.
 
 - `auth` → all auth-related sessions
 - `refactor` → that cleanup from last week
@@ -85,6 +87,7 @@ Searches across **everything** — project names, Git branches, conversation con
 | 🗑️ | **Delete Sessions** | Press `x` to remove unwanted sessions |
 | ⌨️ | **Vim Keybindings** | `j`/`k` navigate, `g`/`G` jump to top/bottom |
 | 🧠 | **Smart CLI** | Auto-detects `mai-claude` vs `claude` |
+| ⌨️ | **ABC Input Source** | Automatically switches macOS to ABC on startup and focus |
 | 🔐 | **100% Local** | No network, no telemetry, no data leaves your machine |
 
 ## Install
@@ -141,7 +144,7 @@ claude-starter --help       # Show help
 
 ## How It Works
 
-Reads the JSONL session files from `~/.claude/projects/`, parses metadata and conversation content. 200 sessions load in ~10ms. **Everything stays local. No API calls, no telemetry.**
+Reads the JSONL session files from `~/.claude/projects/`. Lightweight metadata is loaded first so the TUI can open immediately, then searchable conversation text is indexed one session at a time in the background. **Everything stays local. No API calls, no telemetry.**
 
 ## Requirements
 
@@ -188,7 +191,9 @@ claude-starter
 
 按 `/` 开始输入，**就这么简单**。无需按回车。
 
-跨项目名、Git 分支、对话内容**全文实时搜索**。输入即过滤，`↑↓` 直接导航结果。
+支持搜索会话标题（包括重命名后的标题）、项目名、Git 分支、用户输入和 Claude 的最终回复。工具调用与结果、思考过程、编辑内容及其他内部记录不会进入索引。输入即过滤，`↑↓` 直接导航结果。
+
+TUI 会立即显示，并在后台逐个会话建立全文索引。标题栏显示 `indexing search…` 时，已完成索引的匹配结果会持续加入列表。
 
 - `auth` → 所有认证相关的对话
 - `refactor` → 上周的代码重构
@@ -265,7 +270,7 @@ claude-starter --help       # 显示帮助信息
 
 ## 原理
 
-读取 `~/.claude/projects/` 下的 JSONL 会话文件，解析元数据和对话内容。200 个 session 加载耗时 ~10ms。**所有数据留在本地，不联网。**
+读取 `~/.claude/projects/` 下的 JSONL 会话文件。程序先加载轻量元数据并显示 TUI，再在后台逐个会话建立可搜索文本索引。**所有数据留在本地，不联网。**
 
 ---
 

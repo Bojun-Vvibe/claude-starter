@@ -22,9 +22,13 @@ const mod = require('./index.js');
 const {
   getProjectDisplayName,
   extractUserText,
+  extractSearchableUserText,
   loadSessionQuick,
   loadSessionDetail,
+  buildSessionSearchText,
+  indexSessionsInBackground,
   loadAllSessions,
+  filterSessionList,
   formatTimestamp,
   formatFileSize,
   getProjectColor,
@@ -42,6 +46,8 @@ const {
   CLAUDE_DIR,
   PROJECTS_DIR,
   META_FILE,
+  switchToAbcInputSource,
+  createInputSourceActivator,
 } = mod;
 
 // ─── Test Fixture Helpers ───────────────────────────────────────────────────
@@ -326,6 +332,407 @@ describe('extractUserText', () => {
   });
 });
 
+describe('session search indexing', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-search-test-'));
+  });
+
+  afterEach(() => cleanup(tmpDir));
+
+  it('extracts command names and arguments but skips injected user records', () => {
+    assert.equal(extractSearchableUserText({
+      type: 'user',
+      message: { content: '<command-message>research</command-message>\n<command-name>/research</command-name>\n<command-args>search topic</command-args>' },
+    }), '/research search topic');
+    assert.equal(extractSearchableUserText({
+      type: 'user', isMeta: true,
+      message: { content: [{ type: 'text', text: 'skill-only-marker' }] },
+    }), '');
+    assert.equal(extractSearchableUserText({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', content: 'tool-only-marker' }] },
+    }), '');
+    assert.equal(extractSearchableUserText({
+      type: 'user',
+      message: { content: '[Request interrupted by user for tool use]' },
+    }), '');
+    assert.equal(extractSearchableUserText({
+      type: 'user',
+      message: { content: [
+        { type: 'tool_result', content: 'tool-only-marker' },
+        { type: 'text', text: 'actual follow-up prompt' },
+      ] },
+    }), 'actual follow-up prompt');
+  });
+
+  it('indexes real user input and final responses only', async () => {
+    const filePath = createMockSession(tmpDir, 'search-session', [
+      { type: 'user', isMeta: true, message: { content: [{ type: 'text', text: 'skill-only-marker' }] } },
+      { type: 'user', message: { content: '[Request interrupted by user]' } },
+      { type: 'user', isSidechain: false, message: { content: 'Find the lunar widget' } },
+      { type: 'assistant', message: { stop_reason: 'tool_use', content: [
+        { type: 'text', text: 'commentary-only-marker' },
+        { type: 'tool_use', name: 'Read', input: { file_path: 'tool-only-marker' } },
+      ] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: 'tool-result-marker' }] } },
+      { type: 'assistant', message: { stop_reason: 'tool_use', content: [
+        { type: 'thinking', thinking: 'reasoning-only-marker' },
+        { type: 'tool_use', name: 'Edit', input: { new_string: 'edit-only-marker' } },
+      ] } },
+      { type: 'user', message: { content: '<task-notification>task-only-marker</task-notification>' } },
+      { type: 'assistant', message: { stop_reason: 'end_turn', content: [
+        { type: 'text', text: 'The release-summary-marker is ready.' },
+      ] } },
+      { type: 'assistant', message: { stop_reason: 'end_turn', content: [
+        { type: 'text', text: 'The second-final-marker is also ready.' },
+      ] } },
+      { type: 'assistant' },
+      { type: 'assistant', message: { model: 'claude-test', stop_reason: 'end_turn', content: [
+        { type: 'text', text: "The task tools haven't been used recently. reminder-only-marker" },
+      ] } },
+      { type: 'user', message: { content: 'Follow up on deployment' } },
+      { type: 'assistant', message: { content: [
+        { type: 'text', text: 'legacy-final-marker' },
+      ] } },
+      { type: 'assistant', isApiErrorMessage: true, message: { model: '<synthetic>', stop_reason: 'stop_sequence', content: [
+        { type: 'text', text: 'API Error: api-error-only-marker' },
+      ] } },
+    ]);
+    const searchText = await buildSessionSearchText({ filePath });
+
+    assert.match(searchText, /find the lunar widget/);
+    assert.match(searchText, /follow up on deployment/);
+    assert.match(searchText, /release-summary-marker/);
+    assert.match(searchText, /second-final-marker/);
+    for (const excluded of ['skill-only-marker', 'commentary-only-marker', 'tool-only-marker',
+      'tool-result-marker', 'reasoning-only-marker', 'edit-only-marker', 'task-only-marker',
+      'request interrupted', 'reminder-only-marker', 'legacy-final-marker', 'api-error-only-marker']) {
+      assert.doesNotMatch(searchText, new RegExp(excluded));
+    }
+  });
+
+  it('indexes text that follows a large tool result in the same user record', async () => {
+    const filePath = createMockSession(tmpDir, 'mixed-tool-result', [
+      { type: 'user', message: { content: 'first prompt' } },
+      { type: 'user', message: { content: [
+        { type: 'tool_result', content: 'x'.repeat(10000) },
+        { type: 'text', text: 'mixed-real-marker' },
+      ] } },
+      { type: 'assistant', message: { stop_reason: 'end_turn', content: [
+        { type: 'text', text: 'mixed-final-marker' },
+      ] } },
+    ]);
+
+    const searchText = await buildSessionSearchText({ filePath });
+    assert.match(searchText, /mixed-real-marker/);
+    assert.match(searchText, /mixed-final-marker/);
+  });
+
+  it('indexes the final transcript title even when quick samples miss it', async () => {
+    const filePath = createMockSession(tmpDir, 'transcript-title', [
+      { type: 'user', message: { content: 'find this session' } },
+      { type: 'custom-title', customTitle: 'Archived lunar launch' },
+    ]);
+
+    const session = { filePath };
+    const searchText = await buildSessionSearchText(session);
+    assert.doesNotMatch(searchText, /archived lunar launch/);
+    assert.equal(session.customTitle, 'Archived lunar launch');
+    assert.deepEqual(filterSessionList([session], 'archived lunar launch').map(s => s.filePath), [filePath]);
+  });
+
+  it('indexes Claude-generated AI titles', async () => {
+    const filePath = createMockSession(tmpDir, 'ai-title', [
+      { type: 'user', message: { content: 'Plan a launch' } },
+      { type: 'ai-title', aiTitle: 'Generated lunar plan' },
+    ]);
+
+    const session = { filePath };
+    const searchText = await buildSessionSearchText(session);
+    assert.doesNotMatch(searchText, /generated lunar plan/);
+    assert.equal(session.customTitle, 'Generated lunar plan');
+    assert.deepEqual(filterSessionList([session], 'generated lunar plan').map(s => s.filePath), [filePath]);
+  });
+
+  it('keeps a local custom title ahead of transcript titles', async () => {
+    const filePath = createMockSession(tmpDir, 'local-title-priority', [
+      { type: 'user', message: { content: 'Plan another launch' } },
+      { type: 'ai-title', aiTitle: 'Generated title marker' },
+      { type: 'custom-title', customTitle: 'Transcript title marker' },
+    ]);
+    const session = { filePath, customTitle: 'Local title marker', _customTitleFromMeta: true };
+
+    const searchText = await buildSessionSearchText(session);
+    assert.doesNotMatch(searchText, /local title marker/);
+    assert.doesNotMatch(searchText, /transcript title marker/);
+    assert.equal(session.customTitle, 'Local title marker');
+    assert.equal(session._transcriptTitle, 'Transcript title marker');
+    assert.deepEqual(filterSessionList([session], 'local title marker').map(s => s.filePath), [filePath]);
+  });
+
+  it('keeps a transcript custom title ahead of later AI titles', async () => {
+    const filePath = createMockSession(tmpDir, 'transcript-title-priority', [
+      { type: 'user', message: { content: 'Plan a titled launch' } },
+      { type: 'custom-title', customTitle: 'User transcript title' },
+      { type: 'ai-title', aiTitle: 'Later generated title' },
+    ]);
+    const session = loadSessionQuick(filePath, 'project-test');
+
+    assert.equal(session.customTitle, 'User transcript title');
+    await buildSessionSearchText(session);
+    assert.equal(session.customTitle, 'User transcript title');
+    loadSessionDetail(session);
+    assert.equal(session.customTitle, 'User transcript title');
+    assert.deepEqual(filterSessionList([session], 'user transcript title').map(s => s.filePath), [filePath]);
+    assert.deepEqual(filterSessionList([session], 'later generated title'), []);
+  });
+
+  it('indexes long final responses whose top-level type follows the message', async () => {
+    const longAnswer = `long-final-marker ${'x'.repeat(5000)}`;
+    const filePath = createMockSession(tmpDir, 'long-final', [
+      { type: 'user', message: { content: 'Find the long answer' } },
+      { message: { stop_reason: 'end_turn', content: [{ type: 'text', text: longAnswer }] }, type: 'assistant' },
+    ]);
+
+    const searchText = await buildSessionSearchText({ filePath });
+    assert.match(searchText, /long-final-marker/);
+  });
+
+  it('strips an injected task reminder but keeps the final answer after it', async () => {
+    const reminder = "The task tools haven't been used recently. If you're working on tasks that would benefit from tracking progress, consider using TaskCreate to add new tasks and TaskUpdate to update task status (set to in_progress when starting, completed when done). Also consider cleaning up the task list if it has become stale. Only use these if relevant to the current work. This is just a gentle reminder - ignore if not applicable.";
+    const filePath = createMockSession(tmpDir, 'reminder-with-answer', [
+      { type: 'user', message: { content: 'Finish the report' } },
+      { type: 'assistant', message: { stop_reason: 'end_turn', content: [
+        { type: 'text', text: `${reminder}\n\nreminder-following-final-marker` },
+      ] } },
+    ]);
+
+    const searchText = await buildSessionSearchText({ filePath });
+    assert.match(searchText, /reminder-following-final-marker/);
+    assert.doesNotMatch(searchText, /task tools haven't been used recently/);
+  });
+
+  it('indexes legitimate synthetic-model responses but not internal placeholders', async () => {
+    const filePath = createMockSession(tmpDir, 'synthetic-response', [
+      { type: 'user', message: { content: 'Explain the result' } },
+      { type: 'assistant', message: { model: '<synthetic>', stop_reason: 'stop_sequence', content: [
+        { type: 'text', text: 'legitimate-synthetic-final-marker' },
+      ] } },
+      { type: 'assistant', message: { model: '<synthetic>', stop_reason: 'stop_sequence', content: [
+        { type: 'text', text: 'No response requested.' },
+      ] } },
+    ]);
+
+    const searchText = await buildSessionSearchText({ filePath });
+    assert.match(searchText, /legitimate-synthetic-final-marker/);
+    assert.doesNotMatch(searchText, /no response requested/);
+  });
+
+  it('drops pre-error status replies but keeps a later recovered final answer', async () => {
+    const filePath = createMockSession(tmpDir, 'api-error-recovery', [
+      { type: 'user', message: { content: 'Complete the update' } },
+      { type: 'assistant', message: { stop_reason: 'end_turn', content: [
+        { type: 'text', text: 'pre-error-status-marker' },
+      ] } },
+      { type: 'assistant', isApiErrorMessage: true, message: { stop_reason: 'stop_sequence', content: [
+        { type: 'text', text: 'API Error: Connection closed mid-response.' },
+      ] } },
+      { type: 'assistant', message: { stop_reason: 'end_turn', content: [
+        { type: 'text', text: 'recovered-final-marker' },
+      ] } },
+    ]);
+
+    const searchText = await buildSessionSearchText({ filePath });
+    assert.doesNotMatch(searchText, /pre-error-status-marker/);
+    assert.doesNotMatch(searchText, /connection closed mid-response/);
+    assert.match(searchText, /recovered-final-marker/);
+  });
+
+  it('does not let a sidechain API error clear the main-thread final answer', async () => {
+    const filePath = createMockSession(tmpDir, 'sidechain-api-error', [
+      { type: 'user', message: { content: 'Complete the main task' } },
+      { type: 'assistant', message: { stop_reason: 'end_turn', content: [
+        { type: 'text', text: 'main-final-before-sidechain-error' },
+      ] } },
+      { type: 'assistant', isSidechain: true, isApiErrorMessage: true, message: {
+        stop_reason: 'stop_sequence',
+        content: [{ type: 'text', text: 'API Error: subagent failed' }],
+      } },
+    ]);
+
+    const searchText = await buildSessionSearchText({ filePath });
+    assert.match(searchText, /main-final-before-sidechain-error/);
+    assert.doesNotMatch(searchText, /subagent failed/);
+  });
+
+  it('does not promote interrupted partial output to a final response', async () => {
+    const filePath = createMockSession(tmpDir, 'interrupted-response', [
+      { type: 'user', message: { content: 'Start a long task' } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'partial-output-marker' }] } },
+      { type: 'user', message: { content: '[Request interrupted by user]' } },
+    ]);
+
+    const searchText = await buildSessionSearchText({ filePath });
+    assert.doesNotMatch(searchText, /partial-output-marker/);
+  });
+
+  it('does not promote interrupted stop-sequence output to a final response', async () => {
+    const filePath = createMockSession(tmpDir, 'interrupted-stop-sequence', [
+      { type: 'user', message: { content: 'Start another long task' } },
+      { type: 'assistant', message: { stop_reason: 'stop_sequence', content: [
+        { type: 'text', text: 'stop-sequence-partial-marker' },
+      ] } },
+      { type: 'user', message: { content: '[Request interrupted by user]' } },
+    ]);
+
+    const searchText = await buildSessionSearchText({ filePath });
+    assert.doesNotMatch(searchText, /stop-sequence-partial-marker/);
+  });
+
+  it('does not let sidechain interruption records clear the main turn', async () => {
+    const filePath = createMockSession(tmpDir, 'sidechain-interruption', [
+      { type: 'user', message: { content: 'Main-thread request' } },
+      { type: 'user', isSidechain: true, message: { content: '[Request interrupted by user]' } },
+      { type: 'assistant', message: { stop_reason: 'end_turn', content: [
+        { type: 'text', text: 'main-thread-final-marker' },
+      ] } },
+    ]);
+
+    const searchText = await buildSessionSearchText({ filePath });
+    assert.match(searchText, /main-thread-final-marker/);
+  });
+
+  it('indexes a background-task final answer after user interruption', async () => {
+    const filePath = createMockSession(tmpDir, 'interrupted-background-task', [
+      { type: 'user', message: { content: 'Monitor the background task' } },
+      { type: 'assistant', message: { stop_reason: 'stop_sequence', content: [
+        { type: 'text', text: 'interrupted-background-partial-marker' },
+      ] } },
+      { type: 'user', message: { content: '[Request interrupted by user]' } },
+      { type: 'user', message: { content: '<task-notification>task completed</task-notification>' } },
+      { type: 'assistant', message: { stop_reason: 'end_turn', content: [
+        { type: 'text', text: 'background-task-final-marker' },
+      ] } },
+    ]);
+
+    const searchText = await buildSessionSearchText({ filePath });
+    assert.match(searchText, /background-task-final-marker/);
+    assert.doesNotMatch(searchText, /interrupted-background-partial-marker/);
+  });
+
+  it('uses the first real user prompt rather than metadata for the session topic', () => {
+    const filePath = createMockSession(tmpDir, 'real-topic', [
+      { type: 'user', isMeta: true, timestamp: '2026-07-22T01:00:00Z', message: { content: 'internal-skill-marker' } },
+      { type: 'user', timestamp: '2026-07-22T01:00:01Z', message: { content: 'actual searchable topic' } },
+    ]);
+
+    const session = loadSessionQuick(filePath, 'project-test');
+    assert.equal(session.topic, 'actual searchable topic');
+    loadSessionDetail(session);
+    assert.equal(session.topic, 'actual searchable topic');
+  });
+
+  it('finds a real topic outside the quick head and tail samples', () => {
+    const filePath = createMockSession(tmpDir, 'middle-topic', [
+      { type: 'user', message: { content: `metadata-${'m'.repeat(200000)}` }, isMeta: true, timestamp: '2026-07-22T01:00:00Z' },
+      { type: 'user', timestamp: '2026-07-22T01:00:01Z', message: { content: 'middle-searchable-topic' } },
+      { type: 'user', timestamp: '2026-07-22T01:00:02Z', message: { content: [
+        { type: 'tool_result', content: 'x'.repeat(40000) },
+      ] } },
+      { type: 'assistant', timestamp: '2026-07-22T01:00:03Z', message: { stop_reason: 'end_turn', content: [] } },
+    ]);
+
+    const session = loadSessionQuick(filePath, 'project-test');
+    assert.equal(session.topic, 'middle-searchable-topic');
+  });
+
+  it('defers an ambiguous large topic until background indexing', async () => {
+    const filePath = createMockSession(tmpDir, 'deferred-middle-topic', [
+      { type: 'user', message: { content: `metadata-${'m'.repeat(40000)}` }, isMeta: true, timestamp: '2026-07-22T01:00:00Z' },
+      { type: 'user', timestamp: '2026-07-22T01:00:01Z', message: { content: 'deferred-searchable-topic' } },
+      { type: 'user', timestamp: '2026-07-22T01:00:02Z', message: { content: [
+        { type: 'tool_result', content: 'x'.repeat(40000) },
+      ] } },
+      { type: 'assistant', timestamp: '2026-07-22T01:00:03Z', message: { stop_reason: 'end_turn', content: [] } },
+    ]);
+
+    const session = loadSessionQuick(filePath, 'project-test', { deferTopicScan: true });
+    assert.equal(session._topicNeedsScan, true);
+    assert.equal(session.topic, '(indexing topic…)');
+    await buildSessionSearchText(session);
+    assert.equal(session.topic, 'deferred-searchable-topic');
+    assert.equal(session._topicNeedsScan, false);
+  });
+
+  it('does not use a later tail prompt as the session topic', async () => {
+    const filePath = createMockSession(tmpDir, 'middle-before-tail-topic', [
+      { type: 'user', message: { content: `metadata-${'m'.repeat(40000)}` }, isMeta: true, timestamp: '2026-07-22T01:00:00Z' },
+      { type: 'user', timestamp: '2026-07-22T01:00:01Z', message: { content: 'first-middle-topic' } },
+      { type: 'user', timestamp: '2026-07-22T01:00:02Z', message: { content: [
+        { type: 'tool_result', content: 'x'.repeat(40000) },
+      ] } },
+      { type: 'user', timestamp: '2026-07-22T01:00:03Z', message: { content: 'later-tail-topic' } },
+      { type: 'assistant', timestamp: '2026-07-22T01:00:04Z', message: { stop_reason: 'end_turn', content: [] } },
+    ]);
+
+    const session = loadSessionQuick(filePath, 'project-test', { deferTopicScan: true });
+    assert.equal(session.topic, '(indexing topic…)');
+    await buildSessionSearchText(session);
+    assert.equal(session.topic, 'first-middle-topic');
+  });
+
+  it('does not salvage a truncated tool-result payload as the topic', () => {
+    const filePath = createMockSession(tmpDir, 'truncated-tool-result', [
+      { type: 'user', message: { content: [
+        { tool_use_id: 'tool-1', type: 'tool_result', content: `internal-${'x'.repeat(40000)}` },
+      ] }, timestamp: '2026-07-22T01:00:00Z' },
+      { type: 'assistant', timestamp: '2026-07-22T01:00:01Z', message: { stop_reason: 'end_turn', content: [] } },
+    ]);
+
+    const session = loadSessionQuick(filePath, 'project-test');
+    assert.equal(session.topic, '(no user messages)');
+  });
+
+  it('defers indexing and processes sessions incrementally', async () => {
+    const sessions = [
+      { sessionId: 'one', filePath: createMockSession(tmpDir, 'one', [
+        { type: 'user', message: { content: 'first-search-marker' } },
+      ]) },
+      { sessionId: 'two', filePath: createMockSession(tmpDir, 'two', [
+        { type: 'user', message: { content: 'second-search-marker' } },
+      ]) },
+    ];
+    const scheduled = [];
+    const indexed = [];
+    let completed = false;
+
+    indexSessionsInBackground(sessions, {
+      schedule: callback => scheduled.push(callback),
+      onSessionIndexed: session => indexed.push(session.sessionId),
+      onComplete: () => { completed = true; },
+    });
+
+    assert.equal(indexed.length, 0);
+    await scheduled.shift()();
+    assert.deepEqual(indexed, ['one']);
+    await scheduled.shift()();
+    assert.deepEqual(indexed, ['one', 'two']);
+    await scheduled.shift()();
+    assert.equal(completed, true);
+  });
+
+  it('combines exact project filtering with text and renamed titles', () => {
+    const sessions = [
+      { sessionId: 'alpha', project: 'project-alpha', topic: 'first', customTitle: 'Launch Notes', searchText: 'release marker' },
+      { sessionId: 'beta', project: 'project-beta', topic: 'second', searchText: 'mentions project-alpha release marker' },
+    ];
+    assert.deepEqual(filterSessionList(sessions, 'release', 'project-alpha').map(s => s.sessionId), ['alpha']);
+    assert.deepEqual(filterSessionList(sessions, 'launch notes', '').map(s => s.sessionId), ['alpha']);
+  });
+});
+
 // =============================================================================
 // 7. PERMISSION_MODES constant
 // =============================================================================
@@ -473,6 +880,24 @@ describe('Meta operations', () => {
       assert.equal(meta.sessions['session-1'].customTitle, undefined);
       assert.equal(meta.sessions['session-1'].permissionMode, 'plan');
       assert.equal(session.customTitle, '');
+    });
+
+    it('reveals and searches the transcript title after clearing a local override', () => {
+      const meta = { sessions: { 'session-1': { customTitle: 'Local title' } } };
+      const session = {
+        sessionId: 'session-1',
+        project: 'test',
+        topic: 'topic',
+        customTitle: 'Local title',
+        _transcriptTitle: 'Transcript title',
+        _customTitleFromMeta: true,
+      };
+
+      assert.equal(updateSessionTitle(meta, session, ''), '');
+      assert.equal(session.customTitle, 'Transcript title');
+      assert.equal(session._customTitleFromMeta, false);
+      assert.deepEqual(filterSessionList([session], 'transcript title'), [session]);
+      assert.deepEqual(filterSessionList([session], 'local title'), []);
     });
   });
 });
@@ -1085,7 +1510,67 @@ describe('package.json', () => {
 });
 
 // =============================================================================
-// 18. detectCLI
+// 18. macOS input source
+// =============================================================================
+describe('switchToAbcInputSource', () => {
+  it('switches macOS input to ABC with macism', () => {
+    const calls = [];
+    const runCommand = (command, args, options) => {
+      calls.push({ command, args, options });
+      return { status: 0 };
+    };
+
+    assert.equal(switchToAbcInputSource('darwin', runCommand), true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].command, 'macism');
+    assert.deepEqual(calls[0].args, ['com.apple.keylayout.ABC']);
+    assert.equal(calls[0].options.timeout, 1000);
+  });
+
+  it('falls back to the built-in macOS input-source API', () => {
+    const calls = [];
+    const runCommand = (command, args) => {
+      calls.push({ command, args });
+      if (command === 'macism') return { status: null, error: { code: 'ENOENT' } };
+      return { status: 0 };
+    };
+
+    assert.equal(switchToAbcInputSource('darwin', runCommand), true);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].command, '/usr/bin/osascript');
+    assert.deepEqual(calls[1].args.slice(0, 3), ['-l', 'JavaScript', '-e']);
+    assert.match(calls[1].args[3], /com\.apple\.keylayout\.ABC/);
+    assert.match(calls[1].args[3], /ObjC\.bindFunction\("TISSelectInputSource"/);
+    assert.match(calls[1].args[3], /sources\.objectAtIndex\(0\)/);
+  });
+
+  it('does not switch input sources outside macOS', () => {
+    let called = false;
+    assert.equal(switchToAbcInputSource('linux', () => { called = true; }), false);
+    assert.equal(called, false);
+  });
+});
+
+describe('createInputSourceActivator', () => {
+  it('debounces repeated input-source activation', () => {
+    let currentTime = 1000;
+    let switchCount = 0;
+    const activate = createInputSourceActivator(
+      () => { switchCount++; return true; },
+      () => currentTime,
+    );
+
+    assert.equal(activate(), true);
+    currentTime = 1100;
+    assert.equal(activate(), false);
+    currentTime = 1250;
+    assert.equal(activate(), true);
+    assert.equal(switchCount, 2);
+  });
+});
+
+// =============================================================================
+// 19. detectCLI
 // =============================================================================
 describe('detectCLI', () => {
   it('returns an object with name and cmd', () => {
@@ -1097,7 +1582,7 @@ describe('detectCLI', () => {
 });
 
 // =============================================================================
-// 19. Module export validation
+// 20. Module export validation
 // =============================================================================
 describe('Module exports', () => {
   it('exports all expected functions', () => {
@@ -1107,7 +1592,7 @@ describe('Module exports', () => {
       'formatFileSize', 'getProjectColor', 'esc', 'loadMeta',
       'saveMeta', 'getSessionMeta', 'getEffectivePermissionMode',
       'setSessionPermissionMode', 'setGlobalPermissionMode', 'updateSessionTitle',
-      'detectCLI', 'runListMode',
+      'detectCLI', 'switchToAbcInputSource', 'createInputSourceActivator', 'runListMode',
     ];
     for (const fn of expectedFunctions) {
       assert.equal(typeof mod[fn], 'function', `${fn} should be a function`);
