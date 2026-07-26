@@ -1176,7 +1176,7 @@ describe('TUI — c key (copy session ID)', () => {
   });
 });
 
-describe('TUI — PageDown/PageUp/Ctrl-D/Ctrl-U', () => {
+describe('TUI — Vim page navigation', () => {
   before(() => {
     fireScreenKey('home');
     pressDown();  // Move to first session (index 0)
@@ -1199,6 +1199,20 @@ describe('TUI — PageDown/PageUp/Ctrl-D/Ctrl-U', () => {
     fireScreenKey('C-u');
     const after = listSelected();
     assert.ok(after <= before, 'Should not move down after Ctrl-U');
+  });
+
+  it('Ctrl-F moves selection down one page', () => {
+    fireScreenKey('home');
+    const before = listSelected();
+    fireScreenKey('C-f');
+    assert.ok(listSelected() > before, 'Should move down after Ctrl-F');
+  });
+
+  it('Ctrl-B moves selection up one page', () => {
+    fireScreenKey('end');
+    const before = listSelected();
+    fireScreenKey('C-b');
+    assert.ok(listSelected() < before, 'Should move up after Ctrl-B');
   });
 });
 

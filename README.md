@@ -139,7 +139,8 @@ claude-starter --help       # Show help
 | `c` | Copy session ID |
 | `x` / `Delete` | Delete session |
 | `g` / `G` | Jump to top / bottom |
-| `Ctrl-D` / `Ctrl-U` | Page down / up |
+| `Ctrl-F` / `Ctrl-B` | Page down / up |
+| `Ctrl-D` / `Ctrl-U` | Half-page down / up |
 | `q` / `Ctrl-C` | Quit |
 
 ## How It Works
@@ -265,7 +266,8 @@ claude-starter --help       # 显示帮助信息
 | `c` | 复制 Session ID |
 | `x` / `Delete` | 删除会话 |
 | `g` / `G` | 跳到顶 / 底 |
-| `Ctrl-D` / `Ctrl-U` | 翻页 |
+| `Ctrl-F` / `Ctrl-B` | 向下 / 向上翻整页 |
+| `Ctrl-D` / `Ctrl-U` | 向下 / 向上翻半页 |
 | `q` / `Ctrl-C` | 退出 |
 
 ## 原理

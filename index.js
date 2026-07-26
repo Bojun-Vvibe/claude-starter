@@ -24,7 +24,8 @@
  *   d              Resume with bypassPermissions (danger mode)
  *   m              Permission mode picker
  *   Home / End     Jump to top / bottom
- *   Ctrl-D/U       Page down / up
+ *   Ctrl-F/B       Page down / up
+ *   Ctrl-D/U       Half-page down / up
  *   c              Copy session ID to clipboard
  *   x / Delete     Delete selected session
  *   q / Ctrl-C     Quit
@@ -1508,9 +1509,10 @@ function createApp({
   });
 
   function moveSelection(delta) {
-    const newIdx = selectedIndex + delta;
+    const lastIdx = Math.max(-1, filteredSessions.length - 1);
+    const newIdx = Math.max(-1, Math.min(selectedIndex + delta, lastIdx));
     // -1 = New Session, 0..length-1 = sessions
-    if (newIdx >= -1 && newIdx < filteredSessions.length) {
+    if (newIdx !== selectedIndex) {
       selectedIndex = newIdx;
       const listIdx = selectedIndex + 1;  // list index (0 = New Session row)
       suppressSelectEvent = true;
@@ -1558,15 +1560,25 @@ function createApp({
     listPanel.childBase = Math.max(0, selectedIndex + 1 - listPanel.height + 1);
     renderDetail(); updateHeader(); screen.render();
   });
-  screen.key(['pagedown', 'C-d'], () => {
+  screen.key(['pagedown', 'C-f'], () => {
     if (renameMode || popupOpen) return;
     if (isSearchMode) { isSearchMode = false; updateHeader(); screen.render(); }
-    moveSelection(Math.floor((listPanel.height || 20) / 2));
+    moveSelection(listPanel.height || 20);
   });
-  screen.key(['pageup', 'C-u'], () => {
+  screen.key(['pageup', 'C-b'], () => {
     if (renameMode || popupOpen) return;
     if (isSearchMode) { isSearchMode = false; updateHeader(); screen.render(); }
-    moveSelection(-Math.floor((listPanel.height || 20) / 2));
+    moveSelection(-(listPanel.height || 20));
+  });
+  screen.key(['C-d'], () => {
+    if (renameMode || popupOpen) return;
+    if (isSearchMode) { isSearchMode = false; updateHeader(); screen.render(); }
+    moveSelection(Math.max(1, Math.floor((listPanel.height || 20) / 2)));
+  });
+  screen.key(['C-u'], () => {
+    if (renameMode || popupOpen) return;
+    if (isSearchMode) { isSearchMode = false; updateHeader(); screen.render(); }
+    moveSelection(-Math.max(1, Math.floor((listPanel.height || 20) / 2)));
   });
 
   // Search
@@ -2327,7 +2339,8 @@ TUI Keyboard Shortcuts:
   c             Copy session ID
   x / Delete    Delete selected session
   Home / End    Jump to top / bottom
-  Ctrl-D/U      Page down / up
+  Ctrl-F/B      Page down / up
+  Ctrl-D/U      Half-page down / up
   Esc           Clear filter
   q / Ctrl-C    Quit
 `);
