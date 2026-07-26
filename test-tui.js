@@ -1213,6 +1213,39 @@ describe('TUI — Vim page navigation', () => {
     fireScreenKey('C-b');
     assert.ok(listSelected() < before, 'Should move up after Ctrl-B');
   });
+
+  it('preserves a valid viewport offset and refreshes the footer', () => {
+    const originalHeight = W.list.height;
+    W.list.height = 2;
+    fireScreenKey('home');
+
+    fireScreenKey('C-f');
+    assert.equal(listSelected(), 2);
+    assert.equal(W.list.childBase, 2, 'Ctrl-F should advance a full viewport');
+    fireScreenKey('C-b');
+    assert.equal(listSelected(), 0);
+    assert.equal(W.list.childBase, 0, 'Ctrl-B should restore the viewport');
+
+    fireScreenKey('C-d');
+    assert.equal(listSelected(), 1);
+    assert.equal(W.list.childBase, 1, 'Ctrl-D should advance half a viewport');
+    fireScreenKey('C-u');
+    assert.equal(listSelected(), 0);
+    assert.equal(W.list.childBase, 0, 'Ctrl-U should restore the viewport');
+
+    W.list.height = 3;
+    pressDown();
+    pressDown();
+    W.list.height = 2;
+    fireScreenKey('C-d');
+    assert.equal(listSelected(), 3);
+    assert.equal(W.list.childBase, 2, 'page navigation should clamp a stale offset after resize');
+
+    enterSearch();
+    fireScreenKey('C-f');
+    assert.match(footerText(), /New/, 'page navigation should restore the normal footer');
+    W.list.height = originalHeight;
+  });
 });
 
 describe('TUI — Session order (sorted by time)', () => {
