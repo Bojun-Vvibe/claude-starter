@@ -20,16 +20,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: npm install
-      - name: Run tests
-        run: |
-          # --test-force-exit is only available in Node 20+
-          NODE_MAJOR=$(node -e "console.log(process.versions.node.split('.')[0])")
-          if [ "$NODE_MAJOR" -ge 20 ]; then
-            node --test --test-force-exit test.js test-tui.js
-          else
-            node --test test.js
-          fi
+      - run: npm ci
+      - run: npm run test:all
 
   publish:
     needs: test
@@ -44,8 +36,8 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-      - run: npm install
-      - run: node --test --test-force-exit test.js test-tui.js
+      - run: npm ci
+      - run: npm run test:all
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
